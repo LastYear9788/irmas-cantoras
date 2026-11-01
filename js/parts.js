@@ -30,11 +30,22 @@ export function assignParts(lines, mode, playerCount) {
   const solo = isChorus.filter((c) => !c).length;
   const useChorus = solo >= playerCount * 2;
 
-  // 3) blocos de solo vão alternando entre as jogadoras
+  // 3) cada bloco de solo vai pra quem cantou MENOS linhas até agora (empate: a próxima da vez)
   const who = new Array(lines.length);
+  const sung = new Array(playerCount).fill(0);
   let turn = 0;
   blocks.forEach((b, bi) => {
-    const owner = useChorus && isChorus[bi] ? ALL : (turn++ % playerCount);
+    let owner;
+    if (useChorus && isChorus[bi]) owner = ALL;
+    else {
+      owner = turn % playerCount;
+      for (let k = 1; k < playerCount; k++) {
+        const c = (turn + k) % playerCount;
+        if (sung[c] < sung[owner]) owner = c;
+      }
+      sung[owner] += b.length;
+      turn = owner + 1;
+    }
     b.forEach((i) => { who[i] = owner; });
   });
   return who;

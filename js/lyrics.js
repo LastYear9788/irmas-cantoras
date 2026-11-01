@@ -60,11 +60,16 @@ export function buildQueries(title, author) {
   return qs;
 }
 
-async function search(params) {
+// respostas guardadas durante UMA busca (a 2ª tentativa reaproveita, sem pedir de novo)
+let memo = new Map();
+function cached(key, fn) {
+  if (!memo.has(key)) memo.set(key, fn());
+  return memo.get(key);
+}
+
+function search(params) {
   const url = API + '?' + new URLSearchParams(params).toString();
-  const res = await fetch(url);
-  if (!res.ok) throw Object.assign(new Error('http ' + res.status), { server: res.status >= 500 });
-  return res.json();
+  return cached('lrclib ' + url, () => fetchJSON(url));
 }
 
 /* ---------- conferir se é a mesma música (pelo nome) ---------- */
@@ -95,20 +100,29 @@ let deadline = Infinity;
 const outOfTime = () => Date.now() > deadline;
 
 async function fetchJSON(url, opts = {}, ms = 6000) {
-  if (outOfTime()) throw Object.assign(new Error('tempo esgotado'), { timeout: true });
+  if (outOfTime()) throw Object.assign(new Error('tempo esgotado'), { byDeadline: true });
   const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), Math.max(500, Math.min(ms, deadline - Date.now())));
+  const wait = Math.max(500, Math.min(ms, deadline - Date.now()));
+  let byDeadline = false;
+  // se quem cortou foi o tempo máximo da busca (e não o servidor travado), isso NÃO é defeito do servidor
+  const timer = setTimeout(() => { byDeadline = wait < ms; ctl.abort(); }, wait);
   try {
     const res = await fetch(url, { ...opts, signal: ctl.signal });
     if (!res.ok) throw Object.assign(new Error('http ' + res.status), { status: res.status });
     return await res.json();
+  } catch (e) {
+    if (e.name === 'AbortError') e.byDeadline = byDeadline;
+    throw e;
   } finally { clearTimeout(timer); }
 }
 
 /** algum intermediário que aceita esse tipo de pedido está funcionando agora? */
 const proxyAvailable = (post) => PROXIES.some((p) => (!post || p.post) && p.deadUntil < Date.now());
 
-async function proxied(url, opts = {}) {
+function proxied(url, opts = {}) {
+  return cached('px ' + url + ' ' + (opts.body || ''), () => proxiedNow(url, opts));
+}
+async function proxiedNow(url, opts) {
   const isPost = opts.method === 'POST';
   for (let n = 0; n < PROXIES.length; n++) {
     const i = (proxyIdx + n) % PROXIES.length;
@@ -120,6 +134,7 @@ async function proxied(url, opts = {}) {
       return data;
     } catch (e) {
       // "muitos pedidos", erro do servidor ou travou: deixa esse de lado por 2 minutos
+      if (e.byDeadline) throw e;
       if (e.status === 429 || e.status >= 500 || e.name === 'AbortError') px.deadUntil = Date.now() + 120000;
     }
   }
@@ -160,6 +175,9 @@ async function deezerJwt() {
 let jsonpN = 0;
 function deezerSearch(text) {
   const url = 'https://api.deezer.com/search?limit=10&q=' + encodeURIComponent(text);
+  return cached('dz ' + url, () => deezerSearchNow(url));
+}
+function deezerSearchNow(url) {
   if (typeof document === 'undefined') return fetchJSON(url);          // (testes fora do navegador)
   return new Promise((resolve, reject) => {                             // JSONP: a busca do Deezer não libera fetch
     const cb = '__dz' + (++jsonpN);
@@ -221,6 +239,7 @@ export async function findLyrics(title, author, videoDuration) {
   const hay = normName(title + ' ' + cleanAuthor(author)) + ' ' + plain(title);
   const st = { best: null, down: 0, tried: 0 };
   deadline = Date.now() + 20000;   // no máximo ~20s procurando
+  memo = new Map();
   let timedOut = false;
 
   try {
@@ -235,6 +254,7 @@ export async function findLyrics(title, author, videoDuration) {
   } finally {
     relaxed = false;
     deadline = Infinity;
+    memo = new Map();
   }
 
   if (timedOut) throw new Error('Os sites de letras estão muito lentos agora 😢 Tenta de novo daqui a pouco.');
@@ -242,42 +262,40 @@ export async function findLyrics(title, author, videoDuration) {
   throw new Error('Não achei a letra dessa música 😕 Tenta outro link (de preferência o clipe oficial ou o áudio oficial).');
 }
 
-/** Procura em todas as fontes. Devolve logo se achar uma bem parecida; senão guarda a melhor em st.best */
+/** Procura em todas as fontes (cada fonte com todas as formas do título AO MESMO TEMPO).
+ *  Devolve logo se achar uma bem parecida; senão guarda a melhor em st.best */
 async function searchAll(queries, hay, title, videoDuration, st) {
+  const consider = (r) => { if (r && (!st.best || r.diff < st.best.diff)) st.best = r; };
+  const good = () => !!(st.best && st.best.diff <= 4);
+
   // 1) LRCLIB
   st.tried++;
-  for (const q of queries) {
-    if (outOfTime()) return null;
-    let results;
-    try { results = await search(q); }
-    catch (e) { if (e.server || e instanceof TypeError) { st.down++; break; } continue; }
-
-    for (const r of results || []) {
+  const lr = await Promise.allSettled(queries.map((q) => search(q)));
+  if (lr.every((x) => x.status === 'rejected')) st.down++;
+  for (const x of lr) {
+    if (x.status !== 'fulfilled') continue;
+    for (const r of x.value || []) {
       if (!r.syncedLyrics || r.instrumental) continue;
       if (!sameSong(r.trackName, r.artistName, hay)) continue;
       const lines = parseLRC(r.syncedLyrics);
       if (lines.length < 4) continue;
-      const diff = videoDuration ? Math.abs((r.duration || 0) - videoDuration) : 0;
-      if (!st.best || diff < st.best.diff) st.best = { lines, diff, artist: r.artistName, track: r.trackName };
+      consider({ lines, diff: videoDuration ? Math.abs((r.duration || 0) - videoDuration) : 0, artist: r.artistName, track: r.trackName });
     }
-    if (st.best && st.best.diff <= 4) return st.best;   // achou uma bem parecida
   }
+  if (good()) return st.best;
 
   // 2) e 3) Deezer e NetEase
   const wantsVersion = /remix|cover|live|ao vivo|acústico|acustico/i.test(title);
   const texts = [...new Set(queries.map((q) => q.q || `${q.artist_name} ${q.track_name}`))].slice(0, 4);
   for (const find of [deezerFind, neteaseFind]) {
-    for (const text of texts) {
-      if (outOfTime()) return null;
-      // sem intermediário funcionando, nem tenta (Deezer precisa de um que aceite POST)
-      if (!proxyAvailable(find === deezerFind)) break;
-      st.tried++;
-      try {
-        const r = await find(text, videoDuration, wantsVersion, hay);
-        if (r && (!st.best || r.diff < st.best.diff)) st.best = r;
-        if (st.best && st.best.diff <= 4) return st.best;
-      } catch (e) { st.down++; }
-    }
+    if (outOfTime()) return null;
+    // sem intermediário funcionando, nem tenta (Deezer precisa de um que aceite POST)
+    if (!proxyAvailable(find === deezerFind)) continue;
+    st.tried++;
+    const res = await Promise.allSettled(texts.map((t) => find(t, videoDuration, wantsVersion, hay)));
+    if (res.every((x) => x.status === 'rejected')) st.down++;
+    res.forEach((x) => { if (x.status === 'fulfilled') consider(x.value); });
+    if (good()) return st.best;
   }
   return null;
 }
@@ -293,6 +311,15 @@ export function parseLRC(lrc) {
     for (const m of tags) stamps.push({ t: +m[1] * 60 + parseFloat(m[2].replace(':', '.')), text });
   }
   stamps.sort((a, b) => a.t - b.t);
+
+  // duas linhas no mesmo instante (dueto): junta numa só, "linha A / linha B"
+  for (let i = stamps.length - 1; i > 0; i--) {
+    if (Math.abs(stamps[i].t - stamps[i - 1].t) < 0.05) {
+      const a = stamps[i - 1].text, b = stamps[i].text;
+      stamps[i - 1].text = a && b ? `${a} / ${b}` : (a || b);
+      stamps.splice(i, 1);
+    }
+  }
 
   const lines = [];
   for (let i = 0; i < stamps.length; i++) {

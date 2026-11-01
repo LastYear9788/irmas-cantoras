@@ -1,10 +1,10 @@
 // Irmãs Cantoras — fluxo do app (telas, lobby, jogo, resultado)
-import { net } from './net.js?v=5';
-import * as yt from './youtube.js?v=5';
-import { findLyrics } from './lyrics.js?v=5';
-import { assignParts, ALL } from './parts.js?v=5';
-import { mic } from './mic.js?v=5';
-import { Scorer } from './score.js?v=5';
+import { net } from './net.js?v=6';
+import * as yt from './youtube.js?v=6';
+import { findLyrics } from './lyrics.js?v=6';
+import { assignParts, ALL } from './parts.js?v=6';
+import { mic } from './mic.js?v=6';
+import { Scorer } from './score.js?v=6';
 
 const COLORS = ['#ff5fa2', '#4fb3ff', '#ffd166', '#7cf29a'];
 const ALL_COLOR = '#b388ff';
@@ -413,6 +413,7 @@ function syncVideo(g) {
   const expected = (net.hostNow() - g.at) / 1000;   // onde o vídeo deveria estar
   if (expected < 0 || expected > yt.duration()) return;
   const st = yt.state();
+  if (st === 1) g.sawPlaying = true;
   if (st === 3) return;                              // carregando: espera
   if (Math.abs(yt.time() - expected) > 0.5) yt.seek(expected);
   if (st !== 1 && $('tap-overlay').classList.contains('hidden')) yt.play();
@@ -421,7 +422,8 @@ function syncVideo(g) {
 function checkEnd(g) {
   if (!g.started) return;
   const last = g.lines[g.lines.length - 1];
-  if (yt.state() === 0 || yt.time() - g.shift > last.end + 6) finishRound();
+  // "terminou" só vale se o vídeo chegou a tocar nesta rodada (senão é o fim da rodada anterior)
+  if ((yt.state() === 0 && g.sawPlaying) || yt.time() - g.shift > last.end + 6) finishRound();
 }
 
 // voltou pra janela? acerta o tempo na hora
@@ -452,7 +454,7 @@ function gameLoop(round) {
   g.active = active;
 
   const m = mic.read();
-  if (yt.isPlaying()) g.scorer.frame(active, lt, m);
+  if (yt.isPlaying()) { g.sawPlaying = true; g.scorer.frame(active, lt, m); }
 
   if (active >= 0) setLyrics(active, k, (lt - lines[active].t) / (lines[active].end - lines[active].t));
   else setLyrics(-1, k);

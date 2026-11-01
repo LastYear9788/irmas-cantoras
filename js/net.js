@@ -22,6 +22,7 @@ function randomCode() {
   return c;
 }
 
+const NO_PEER = 'Não consegui carregar o sistema de salas. Confere a internet e recarrega a página (F5).';
 const handlers = {};
 let peer = null;
 let hostConn = null;        // (convidada) conexão com a host
@@ -52,6 +53,7 @@ export const net = {
   },
 
   createRoom(name) {
+    if (typeof Peer === 'undefined') return Promise.reject(new Error(NO_PEER));
     return new Promise((resolve, reject) => {
       let tries = 0;
       const attempt = () => {
@@ -80,6 +82,7 @@ export const net = {
   },
 
   joinRoom(code, name) {
+    if (typeof Peer === 'undefined') return Promise.reject(new Error(NO_PEER));
     return new Promise((resolve, reject) => {
       code = code.toUpperCase().trim();
       const p = new Peer(PEER_OPTS);
@@ -107,11 +110,13 @@ export const net = {
           resolve(code);
         });
         c.on('data', (msg) => {
+          if (msg.type === 'hb') return safeSend(c, { type: 'hbr' });
+          if (msg.type === 'hbr') return;
           if (msg.type === 'pong') return onPong(msg);
           if (msg.type === 'players') net.players = msg.players;
           deliver(msg);
         });
-        c.on('close', () => emit('hostgone'));
+        watchConn(c, () => emit('hostgone'));
       });
     });
   },
@@ -152,13 +157,19 @@ function onGuestConnection(c) {
       case 'ping':
         safeSend(c, { type: 'pong', t0: msg.t0, th: Date.now() });
         break;
+      case 'hb':
+        safeSend(c, { type: 'hbr' });
+        break;
+      case 'hbr':
+        break;
       case 'ready': {
         const pl = net.players.find((p) => p.id === c.peer);
         if (pl) { pl.ready = !!msg.ready; pushPlayers(); }
         break;
       }
       default:
-        if (msg._relay) {
+        // convidadas só podem mandar a nota ao vivo e a final (comandos de jogo são só da dona da sala)
+        if (msg._relay && GUEST_CAN_SEND.has(msg.type)) {
           delete msg._relay;
           msg.from = c.peer;
           deliver(msg);
@@ -166,13 +177,35 @@ function onGuestConnection(c) {
         }
     }
   });
-  c.on('close', () => {
+  watchConn(c, () => {
     conns.delete(c.peer);
     const pl = net.players.find((p) => p.id === c.peer);
     net.players = net.players.filter((p) => p.id !== c.peer);
     pushPlayers();
     if (pl) emit('guestleft', pl);
+    try { c.close(); } catch (e) { /* já fechou */ }
   });
+}
+
+const GUEST_CAN_SEND = new Set(['live', 'final']);
+
+/**
+ * "Sinal de vida": a cada 2s manda um oi; se a outra ponta passar 12s sem responder, ela saiu.
+ * (Fechar a aba ou cair a internet nem sempre avisa a conexão na hora.)
+ * Se o MEU relógio estiver atrasado (janela minimizada), não julga — pra não expulsar ninguém à toa.
+ */
+function watchConn(c, onGone) {
+  let lastSeen = Date.now(), lastTick = Date.now(), gone = false;
+  const bye = () => { if (gone) return; gone = true; clearInterval(iv); onGone(); };
+  c.on('data', () => { lastSeen = Date.now(); });
+  c.on('close', bye);
+  const iv = setInterval(() => {
+    const now = Date.now();
+    const gap = now - lastTick;
+    lastTick = now;
+    if (gap < 5000 && now - lastSeen > 12000) return bye();
+    safeSend(c, { type: 'hb' });
+  }, 2000);
 }
 
 // Mede a diferença de relógio com a host (5 pings, fica com o mais rápido)

@@ -54,7 +54,11 @@ export function onState(fn) { stateListeners.push(fn); }
  * Retorna { title, author, duration }.
  */
 export async function prepare(videoId) {
-  const p = await getPlayer();
+  // se o YouTube nem carregar (internet ruim, bloqueio), não fica esperando pra sempre
+  const p = await Promise.race([
+    getPlayer(),
+    new Promise((_, rej) => setTimeout(() => rej(new Error('Não consegui abrir o YouTube. Confere a internet e tenta de novo.')), 20000)),
+  ]);
   if (cancelPrepare) cancelPrepare();
   return new Promise((resolve, reject) => {
     let finished = false;
@@ -70,8 +74,8 @@ export async function prepare(videoId) {
     };
 
     errorListener = (code) => {
-      const msg = (code === 101 || code === 150 || code === 153)
-        ? 'Esse vídeo não deixa tocar fora do YouTube. Tenta outro link (versões "lyrics" ou "karaokê" costumam funcionar).'
+      const msg = (code === 101 || code === 150 || code === 153 || code === 100)
+        ? 'Esse vídeo não pode tocar aqui (ele bloqueia outros sites ou não existe mais). Tenta outro link da mesma música.'
         : 'Não consegui abrir esse vídeo. Confere o link!';
       finish(reject, new Error(msg));
     };
@@ -113,7 +117,8 @@ export function pause() { if (player) player.pauseVideo(); }
 export function rewind() {
   if (!player) return;
   const st = player.getPlayerState();
-  if (st === 1 || st === 2 || st === 3) { player.pauseVideo(); player.seekTo(0, true); }
+  // inclui "terminou" (0): sem isso, a revanche achava que a música já tinha acabado
+  if (st === 0 || st === 1 || st === 2 || st === 3) { player.seekTo(0, true); player.pauseVideo(); }
 }
 export function seek(t) { if (player) player.seekTo(Math.max(0, t), true); }
 export function time() { return player ? player.getCurrentTime() || 0 : 0; }
