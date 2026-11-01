@@ -83,31 +83,43 @@ function sameSong(foundTrack, foundArtist, haystack) {
 
 /* ---------- intermediários públicos (pra fontes que bloqueiam o navegador) ---------- */
 const PROXIES = [
-  { wrap: (u) => 'https://cors.eu.org/' + u, post: true },
-  { wrap: (u) => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u), post: false },
+  { wrap: (u) => 'https://cors.eu.org/' + u, post: true, deadUntil: 0 },
+  { wrap: (u) => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u), post: false, deadUntil: 0 },
 ];
 let proxyIdx = 0;
 
-async function fetchJSON(url, opts = {}, ms = 9000) {
+// tempo máximo da busca inteira (pra nunca ficar "Procurando a letra…" pra sempre)
+let deadline = Infinity;
+const outOfTime = () => Date.now() > deadline;
+
+async function fetchJSON(url, opts = {}, ms = 6000) {
+  if (outOfTime()) throw Object.assign(new Error('tempo esgotado'), { timeout: true });
   const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), ms);
+  const timer = setTimeout(() => ctl.abort(), Math.max(500, Math.min(ms, deadline - Date.now())));
   try {
     const res = await fetch(url, { ...opts, signal: ctl.signal });
-    if (!res.ok) throw new Error('http ' + res.status);
+    if (!res.ok) throw Object.assign(new Error('http ' + res.status), { status: res.status });
     return await res.json();
   } finally { clearTimeout(timer); }
 }
+
+/** algum intermediário que aceita esse tipo de pedido está funcionando agora? */
+const proxyAvailable = (post) => PROXIES.some((p) => (!post || p.post) && p.deadUntil < Date.now());
 
 async function proxied(url, opts = {}) {
   const isPost = opts.method === 'POST';
   for (let n = 0; n < PROXIES.length; n++) {
     const i = (proxyIdx + n) % PROXIES.length;
-    if (isPost && !PROXIES[i].post) continue;
+    const px = PROXIES[i];
+    if ((isPost && !px.post) || px.deadUntil > Date.now()) continue;
     try {
-      const data = await fetchJSON(PROXIES[i].wrap(url), opts);
+      const data = await fetchJSON(px.wrap(url), opts);
       proxyIdx = i;           // lembra qual funcionou
       return data;
-    } catch (e) { /* tenta o próximo */ }
+    } catch (e) {
+      // "muitos pedidos", erro do servidor ou travou: deixa esse de lado por 2 minutos
+      if (e.status === 429 || e.status >= 500 || e.name === 'AbortError') px.deadUntil = Date.now() + 120000;
+    }
   }
   throw new Error('proxy');
 }
@@ -206,17 +218,24 @@ export async function findLyrics(title, author, videoDuration) {
   const queries = buildQueries(title, author);
   const hay = normName(title + ' ' + cleanAuthor(author)) + ' ' + plain(title);
   const st = { best: null, down: 0, tried: 0 };
+  deadline = Date.now() + 20000;   // no máximo ~20s procurando
+  let timedOut = false;
 
-  // 1ª passada: exige que o artista apareça no título/canal. 2ª: só o nome da música.
-  for (const rel of [false, true]) {
-    relaxed = rel;
-    try {
+  try {
+    // 1ª passada: exige que o artista apareça no título/canal. 2ª: só o nome da música.
+    for (const rel of [false, true]) {
+      relaxed = rel;
       const r = await searchAll(queries, hay, title, videoDuration, st);
       if (r) return r;
-    } finally { relaxed = false; }
-    if (st.best) return st.best;
+      if (st.best) return st.best;
+      if (outOfTime()) { timedOut = true; break; }
+    }
+  } finally {
+    relaxed = false;
+    deadline = Infinity;
   }
 
+  if (timedOut) throw new Error('Os sites de letras estão muito lentos agora 😢 Tenta de novo daqui a pouco.');
   if (st.down === st.tried) throw new Error('Os sites de letras estão fora do ar agora 😢 Tenta de novo daqui a pouco.');
   throw new Error('Não achei a letra dessa música 😕 Tenta outro link (de preferência o clipe oficial ou o áudio oficial).');
 }
@@ -226,6 +245,7 @@ async function searchAll(queries, hay, title, videoDuration, st) {
   // 1) LRCLIB
   st.tried++;
   for (const q of queries) {
+    if (outOfTime()) return null;
     let results;
     try { results = await search(q); }
     catch (e) { if (e.server || e instanceof TypeError) { st.down++; break; } continue; }
@@ -246,6 +266,9 @@ async function searchAll(queries, hay, title, videoDuration, st) {
   const texts = [...new Set(queries.map((q) => q.q || `${q.artist_name} ${q.track_name}`))].slice(0, 4);
   for (const find of [deezerFind, neteaseFind]) {
     for (const text of texts) {
+      if (outOfTime()) return null;
+      // sem intermediário funcionando, nem tenta (Deezer precisa de um que aceite POST)
+      if (!proxyAvailable(find === deezerFind)) break;
       st.tried++;
       try {
         const r = await find(text, videoDuration, wantsVersion, hay);
