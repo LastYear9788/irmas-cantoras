@@ -356,8 +356,7 @@ net.on('start', async (msg) => {
   show('game');
   document.body.classList.add('playing');
 
-  yt.pause();
-  yt.seek(0);
+  yt.rewind();
   if (state.preparedId !== state.song.videoId) {
     try { await yt.prepare(state.song.videoId); state.preparedId = state.song.videoId; } catch (e) { toast(e.message, 6000); }
   }

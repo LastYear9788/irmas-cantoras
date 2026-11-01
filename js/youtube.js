@@ -79,14 +79,24 @@ export async function prepare(videoId) {
     p.mute();
     p.loadVideoById(videoId, 0);
 
+    let metaAt = 0;
     const poll = setInterval(() => {
       const st = p.getPlayerState();
       const d = p.getDuration();
       const data = p.getVideoData() || {};
-      if (st === YT.PlayerState.PLAYING && d > 0 && data.title) {
+      if (!(d > 0 && data.title)) return;
+      const info = { title: data.title, author: data.author || '', duration: d };
+      if (st === YT.PlayerState.PLAYING) {
         p.pauseVideo();
         p.seekTo(0, true);
-        finish(resolve, { title: data.title, author: data.author || '', duration: d });
+        return finish(resolve, info);
+      }
+      // às vezes o navegador não deixa nem o play mudo de teste; se já temos nome e
+      // duração e não deu erro em 2,5s, o vídeo está ok (na hora do jogo tem o botão "Clique para começar")
+      if (!metaAt) { metaAt = Date.now(); p.playVideo(); }
+      else if (Date.now() - metaAt > 2500) {
+        p.cueVideoById(videoId, 0);
+        finish(resolve, info);
       }
     }, 200);
 
@@ -99,6 +109,12 @@ export function play() { if (player) { if (muted) player.mute(); else { player.u
 /** liga/desliga o som da música (só neste PC) */
 export function setMuted(m) { muted = m; if (player) { if (m) player.mute(); else { player.unMute(); player.setVolume(100); } } }
 export function pause() { if (player) player.pauseVideo(); }
+/** volta pro começo sem dar play (se o vídeo estiver só "carregado", já está no começo) */
+export function rewind() {
+  if (!player) return;
+  const st = player.getPlayerState();
+  if (st === 1 || st === 2 || st === 3) { player.pauseVideo(); player.seekTo(0, true); }
+}
 export function seek(t) { if (player) player.seekTo(Math.max(0, t), true); }
 export function time() { return player ? player.getCurrentTime() || 0 : 0; }
 export function state() { return player ? player.getPlayerState() : -1; }
