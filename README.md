@@ -32,7 +32,7 @@ Pronto. O app acha a letra sozinho, divide quem canta o quê e dá a nota no fin
 Site estático, sem build: HTML + CSS + JavaScript puro.
 - `js/net.js`: salas via PeerJS (conexão direta entre os PCs; a dona da sala repassa as mensagens). Já suporta mais de 2 jogadoras.
 - `js/youtube.js`: player do YouTube.
-- `js/lyrics.js`: letra sincronizada. Tenta em ordem: [LRCLIB](https://lrclib.net), Deezer (bom pra música brasileira) e NetEase (bom pra internacional). Deezer e NetEase passam pelo intermediário público `cors.eu.org`. Sempre confere se o nome da música bate com o título do vídeo.
+- `js/lyrics.js`: letra sincronizada. Tenta em ordem: [LRCLIB](https://lrclib.net), Deezer (bom pra música brasileira) e NetEase (bom pra internacional). Deezer e NetEase passam pelo nosso intermediário na Cloudflare (`proxy/worker.js`, plano grátis), com `cors.eu.org` e `allorigins` de reserva. Pra republicar o intermediário: `cd proxy && npx wrangler deploy`. Sempre confere se o nome da música bate com o título do vídeo.
 - `js/parts.js`: quem canta cada linha.
 - `js/mic.js` / `js/score.js`: microfone, afinação e nota.
 - `js/app.js`: telas e fluxo.

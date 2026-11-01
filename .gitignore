@@ -1,1 +1,3 @@
 .claude/
+proxy/.wrangler/
+node_modules/

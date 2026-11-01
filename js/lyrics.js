@@ -83,6 +83,8 @@ function sameSong(foundTrack, foundArtist, haystack) {
 
 /* ---------- intermediários públicos (pra fontes que bloqueiam o navegador) ---------- */
 const PROXIES = [
+  // o nosso (Cloudflare, grátis, código em proxy/worker.js); os outros dois são públicos, de reserva
+  { wrap: (u) => 'https://irmas-cantoras-proxy.irmascantoras.workers.dev/?url=' + encodeURIComponent(u), post: true, deadUntil: 0 },
   { wrap: (u) => 'https://cors.eu.org/' + u, post: true, deadUntil: 0 },
   { wrap: (u) => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u), post: false, deadUntil: 0 },
 ];
