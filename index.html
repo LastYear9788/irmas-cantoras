@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Irmãs Cantoras</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎤</text></svg>">
+  <link rel="stylesheet" href="css/glass.css">
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <!-- Fundo animado (é o que dá vida ao vidro) -->
+  <div class="blobs" aria-hidden="true">
+    <span class="blob b1"></span><span class="blob b2"></span>
+    <span class="blob b3"></span><span class="blob b4"></span>
+  </div>
+
+  <!-- Vídeo do YouTube (fica atrás de tudo durante o jogo) -->
+  <div id="video-wrap"><div id="yt"></div></div>
+
+  <main>
+    <!-- ============ INÍCIO ============ -->
+    <section id="screen-home" class="screen active">
+      <div class="card glass hero">
+        <div class="logo">🎤</div>
+        <h1 class="title">Irmãs Cantoras</h1>
+        <p class="subtitle">Duelo de karaokê. Quem canta melhor?</p>
+
+        <label class="field">
+          <span>Seu nome</span>
+          <input id="in-name" class="glass-input" maxlength="16" placeholder="Ex: Ana" autocomplete="off">
+        </label>
+
+        <button id="btn-create" class="btn btn-primary">Criar sala</button>
+
+        <div class="divider"><span>ou entre numa sala</span></div>
+
+        <div class="row">
+          <input id="in-code" class="glass-input code-input" maxlength="4" placeholder="CÓDIGO" autocomplete="off">
+          <button id="btn-join" class="btn">Entrar</button>
+        </div>
+        <p id="home-msg" class="msg"></p>
+      </div>
+      <p class="footnote">Use Chrome ou Edge · Use fone de ouvido 🎧</p>
+    </section>
+
+    <!-- ============ LOBBY ============ -->
+    <section id="screen-lobby" class="screen">
+      <div class="lobby-grid">
+        <div class="card glass">
+          <div class="room-head">
+            <div>
+              <div class="label">Sala</div>
+              <div id="room-code" class="room-code">----</div>
+            </div>
+            <button id="btn-invite" class="btn btn-small">Copiar convite</button>
+          </div>
+          <div class="label">Jogadoras</div>
+          <ul id="player-list" class="player-list"></ul>
+          <p id="wait-hint" class="hint"></p>
+
+          <div class="label">Microfone</div>
+          <div class="mic-box">
+            <div class="meter"><div id="mic-meter" class="meter-fill"></div></div>
+            <button id="btn-mic" class="btn btn-small">Ativar microfone</button>
+          </div>
+          <p id="mic-msg" class="hint">Fale alguma coisa: a barra tem que mexer. Use fone de ouvido!</p>
+
+          <button id="btn-ready" class="btn btn-primary">Estou pronta!</button>
+        </div>
+
+        <div class="card glass">
+          <div class="label">Música</div>
+          <div id="host-song-controls">
+            <div class="row">
+              <input id="in-url" class="glass-input" placeholder="Cole o link do YouTube aqui" autocomplete="off">
+              <button id="btn-load" class="btn">Buscar</button>
+            </div>
+          </div>
+          <p id="guest-song-hint" class="hint hidden">A dona da sala está escolhendo a música…</p>
+
+          <div id="song-card" class="song-card hidden">
+            <img id="song-thumb" alt="">
+            <div class="song-info">
+              <div id="song-title" class="song-title"></div>
+              <div id="song-status" class="song-status"></div>
+            </div>
+          </div>
+
+          <div class="label">Modo</div>
+          <div id="mode-toggle" class="segmented">
+            <button data-mode="turns" class="seg active">🎭 Revezamento</button>
+            <button data-mode="together" class="seg">🎶 Juntas</button>
+          </div>
+          <p id="mode-hint" class="hint"></p>
+
+          <button id="btn-start" class="btn btn-primary btn-big" disabled>Começar!</button>
+          <p id="start-hint" class="hint center"></p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ JOGO ============ -->
+    <section id="screen-game" class="screen">
+      <div id="scoreboard" class="scoreboard"></div>
+
+      <div class="card glass lyrics-card">
+        <div id="ly-prev" class="ly-line ly-prev"></div>
+        <div id="ly-tag" class="ly-tag"></div>
+        <div id="ly-cur" class="ly-line ly-cur"></div>
+        <div id="ly-next-tag" class="ly-tag small"></div>
+        <div id="ly-next" class="ly-line ly-next"></div>
+      </div>
+
+      <div class="game-bottom">
+        <div class="glass pill mic-pill">
+          🎤 <div class="meter small"><div id="game-meter" class="meter-fill"></div></div>
+        </div>
+        <div class="glass pill sync-pill">
+          <span>Letra</span>
+          <button id="btn-sync-minus" class="mini" title="Letra atrasada? Clique aqui">−</button>
+          <span id="sync-val">0,0s</span>
+          <button id="btn-sync-plus" class="mini" title="Letra adiantada? Clique aqui">+</button>
+        </div>
+        <button id="btn-end" class="btn btn-small">Encerrar</button>
+      </div>
+
+      <div id="countdown" class="overlay hidden"><div id="countdown-num" class="countdown-num">3</div></div>
+      <div id="tap-overlay" class="overlay hidden">
+        <button id="btn-tap" class="btn btn-primary btn-big">▶ Clique para começar</button>
+      </div>
+    </section>
+
+    <!-- ============ RESULTADO ============ -->
+    <section id="screen-result" class="screen">
+      <div class="card glass result-card">
+        <div id="result-crown" class="crown">👑</div>
+        <h2 id="result-title" class="title small">Resultado</h2>
+        <div id="result-list" class="result-list"></div>
+        <p id="result-wait" class="hint center"></p>
+        <div id="result-host" class="row center">
+          <button id="btn-rematch" class="btn btn-primary">Revanche</button>
+          <button id="btn-other" class="btn">Outra música</button>
+        </div>
+        <p id="result-guest" class="hint center hidden">Esperando a dona da sala…</p>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast glass"></div>
+</body>
+</html>
