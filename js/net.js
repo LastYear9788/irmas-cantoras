@@ -233,7 +233,7 @@ function sizeOk(msg) {
   try { return JSON.stringify(msg).length <= (MAX_SIZE[msg.type] || 4000); } catch (e) { return false; }
 }
 
-const GUEST_CAN_SEND = new Set(['live', 'final', 'enqueue', 'react', 'photos', 'photo-hide']);
+const GUEST_CAN_SEND = new Set(['live', 'final', 'suggest', 'react', 'photos', 'photo-hide']);
 
 /**
  * "Sinal de vida": a cada 2s manda um oi; se a outra ponta passar 12s sem responder, ela saiu.

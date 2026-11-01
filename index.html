@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Irmãs Cantoras</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎤</text></svg>">
-  <link rel="stylesheet" href="css/glass.css?v=11">
+  <link rel="stylesheet" href="css/glass.css?v=12">
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
-  <script type="module" src="js/app.js?v=11"></script>
+  <script type="module" src="js/app.js?v=12"></script>
 </head>
 <body>
   <!-- Fundo animado (é o que dá vida ao vidro) -->
@@ -105,7 +105,7 @@
             </div>
             <p class="tip">💡 <b>Dica:</b> quer cantar sem a voz do cantor? No YouTube, procure o nome da música + <b>karaokê</b> e cole esse link aqui.</p>
           </div>
-          <p id="guest-song-hint" class="hint hidden">A dona da sala está escolhendo a música…</p>
+          <p id="guest-song-hint" class="hint hidden">A dona da sala está escolhendo a música… 🎶</p>
 
           <div id="song-card" class="song-card hidden">
             <img id="song-thumb" alt="">
@@ -116,8 +116,13 @@
             <button id="btn-skip" class="link skip-btn hidden" title="Pular essa música">Pular</button>
           </div>
 
+          <div id="pending-box" class="hidden">
+            <div class="label">Sugestões esperando aprovação</div>
+            <ul id="pending-list" class="queue-list"></ul>
+          </div>
+
           <div id="queue-box" class="hidden">
-            <div class="label">Próximas na fila</div>
+            <div class="label">🎶 Playlist (próximas músicas)</div>
             <ul id="queue-list" class="queue-list"></ul>
           </div>
 

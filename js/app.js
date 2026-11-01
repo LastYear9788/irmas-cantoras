@@ -1,11 +1,11 @@
 // Irmãs Cantoras — fluxo do app (telas, lobby, jogo, resultado)
-import { net } from './net.js?v=11';
-import * as yt from './youtube.js?v=11';
-import { findLyrics } from './lyrics.js?v=11';
-import { assignParts, ALL } from './parts.js?v=11';
-import { mic } from './mic.js?v=11';
-import { Scorer } from './score.js?v=11';
-import { cam } from './cam.js?v=11';
+import { net } from './net.js?v=12';
+import * as yt from './youtube.js?v=12';
+import { findLyrics } from './lyrics.js?v=12';
+import { assignParts, ALL } from './parts.js?v=12';
+import { mic } from './mic.js?v=12';
+import { Scorer } from './score.js?v=12';
+import { cam } from './cam.js?v=12';
 
 const COLORS = ['#ff5fa2', '#4fb3ff', '#ffd166', '#7cf29a'];
 const ALL_COLOR = '#b388ff';
@@ -23,7 +23,8 @@ const state = {
   game: null,            // dados da rodada atual
   finals: Object.create(null),   // id -> resultado final
   live: Object.create(null),     // id -> pontuação ao vivo
-  queue: [],             // fila de músicas [{ videoId, by, title }]
+  queue: [],             // playlist (aprovadas) [{ videoId, by, title }]
+  pending: [],           // sugestões esperando a dona da sala [{ sid, videoId, by, byId, title }]
   wins: Object.create(null),     // id -> vitórias na noite
   autoStart: false,      // começar sozinha quando a próxima música carregar
   photos: Object.create(null),   // id -> fotos da rodada (só na memória)
@@ -140,6 +141,8 @@ function enterLobby() {
   $('home-msg').textContent = '';
   $('room-code').textContent = net.code;
   $('guest-song-hint').classList.add('hidden');
+  $('in-url').placeholder = net.isHost ? 'Cole um link do YouTube aqui' : 'Cole um link pra sugerir uma música';
+  $('btn-load').textContent = net.isHost ? 'Adicionar' : 'Sugerir';
   $('mode-toggle').classList.toggle('locked', !net.isHost);
   $('btn-start').classList.toggle('hidden', !net.isHost);
   $('btn-end').classList.toggle('hidden', !net.isHost);
@@ -181,7 +184,7 @@ function renderLobby() {
     else if (!allReady) hint = 'Esperando todas clicarem em "Estou pronta!".';
     else if (net.players.length < 2) hint = 'Dá pra começar sozinha pra treinar!';
   } else {
-    hint = !hasSong ? 'Cola um link pra sugerir uma música 🎶' : allReady ? 'Esperando a dona da sala começar…' : '';
+    hint = !hasSong ? '' : allReady ? 'Esperando a dona da sala começar…' : '';
   }
   $('start-hint').textContent = hint;
   $('start-hint').classList.toggle('hidden', !hint);
@@ -269,7 +272,8 @@ $('btn-ready').onclick = async () => {
 /* ---------- música + fila (qualquer uma cola link; a dona da sala organiza) ---------- */
 $('btn-load').onclick = submitLink;
 $('in-url').addEventListener('keydown', (e) => { if (e.key === 'Enter') submitLink(); });
-$('in-url').addEventListener('paste', () => setTimeout(submitLink, 50));
+// botão "Adicionar" fica destacado quando tem link no campo
+$('in-url').addEventListener('input', () => $('btn-load').classList.toggle('btn-primary', !!$('in-url').value.trim()));
 
 const myName = () => (net.players.find((p) => p.id === net.myId) || {}).name || 'Alguém';
 
@@ -284,24 +288,73 @@ function submitLink() {
     return;
   }
   $('in-url').value = '';
+  $('btn-load').classList.remove('btn-primary');
   if (isQueued(id)) { toast('Essa música já está aí 😉'); return; }
+  if (state.pending.some((p) => p.videoId === id)) { toast('Essa música já foi sugerida 😉'); return; }
+  if (!net.isHost) {
+    net.broadcast({ type: 'suggest', videoId: id });
+    toast(`Sugestão enviada! ${hostName()} vai aprovar ou não 🙂`, 4000);
+    return;
+  }
   const busy = !!(state.song || loadingId || state.queue.length);
-  if (net.isHost) enqueue(id, myName());
-  else net.broadcast({ type: 'enqueue', videoId: id });
-  toast(busy ? 'Adicionada na fila 🎶' : 'Carregando a música… 🎶');
+  enqueue(id, myName());
+  toast(busy ? 'Adicionada na playlist 🎶' : 'Carregando a música… 🎶');
+}
+
+const hostName = () => (net.players[0] || {}).name || 'A dona da sala';
+
+/* ---------- sugestões das convidadas: a dona da sala aprova ou recusa ---------- */
+const lastSuggestFrom = Object.create(null);
+let suggestN = 0;
+net.on('suggest', (msg) => {
+  if (!net.isHost || msg.from === net.myId) return;
+  const now = Date.now();
+  if (now - (lastSuggestFrom[msg.from] || 0) < 1000) return;      // no máximo 1 por segundo de cada
+  lastSuggestFrom[msg.from] = now;
+  const id = yt.extractVideoId(String(msg.videoId || ''));
+  const who = net.players.find((p) => p.id === msg.from);
+  if (!id || !who || isQueued(id) || state.pending.some((p) => p.videoId === id)) return;
+  if (state.pending.length >= 10) return;
+  const item = { sid: 's' + (++suggestN), videoId: id, by: who.name, byId: who.id, title: 'Vídeo do YouTube' };
+  state.pending.push(item);
+  broadcastSetup();
+  fetchTitle(item);
+  toast(`${who.name} sugeriu uma música 🎶 Aprova ou não aqui embaixo.`, 4000);
+});
+
+function decide(sid, ok) {
+  const i = state.pending.findIndex((p) => p.sid === sid);
+  if (i < 0) return;
+  const [item] = state.pending.splice(i, 1);
+  if (ok) enqueue(item.videoId, item.by);
+  else broadcastSetup();
+  net.broadcast({ type: 'decision', ok, byId: item.byId, title: item.title });
+}
+$('pending-list').addEventListener('click', (e) => {
+  const b = e.target.closest('.q-ok, .q-no');
+  if (!b || !net.isHost) return;
+  decide(b.dataset.sid, b.classList.contains('q-ok'));
+});
+// a convidada fica sabendo o que aconteceu com a sugestão dela
+net.on('decision', (msg) => {
+  if (msg.byId !== net.myId || net.isHost) return;
+  toast(msg.ok ? `${hostName()} aprovou "${msg.title}" 🎉 Tá na playlist!` : `${hostName()} não aprovou "${msg.title}" 😅`, 5000);
+});
+
+function renderPending() {
+  $('pending-box').classList.toggle('hidden', !state.pending.length);
+  $('pending-list').innerHTML = state.pending.map((q) => `
+    <li>
+      <img src="${yt.thumbUrl(q.videoId)}" alt="">
+      <div class="q-info"><div class="q-title">${esc(q.title)}</div><div class="q-by">sugerida por ${esc(q.by)}</div></div>
+      ${net.isHost
+        ? `<div class="q-actions"><button class="q-ok" data-sid="${esc(q.sid)}" title="Aprovar: vai pra playlist">✓ Aprovar</button><button class="q-no" data-sid="${esc(q.sid)}" title="Recusar">✕</button></div>`
+        : `<span class="q-wait">⏳ esperando ${esc(hostName())}</span>`}
+    </li>`).join('');
 }
 
 // convidada mandou uma música: só a dona da sala coloca na fila
-const lastEnqueueFrom = Object.create(null);
-net.on('enqueue', (msg) => {
-  if (!net.isHost || msg.from === net.myId) return;
-  const now = Date.now();
-  if (now - (lastEnqueueFrom[msg.from] || 0) < 1000) return;   // no máximo 1 por segundo de cada
-  lastEnqueueFrom[msg.from] = now;
-  const id = yt.extractVideoId(String(msg.videoId || ''));
-  const who = net.players.find((p) => p.id === msg.from);
-  if (id && who) enqueue(id, who.name);
-});
+// (só a dona da sala escolhe as músicas; convidadas não mandam links)
 
 const isQueued = (id) => !!((state.song && state.song.videoId === id) || loadingId === id || state.queue.some((q) => q.videoId === id));
 
@@ -417,21 +470,23 @@ function songCard(id, title, status, cls) {
 function broadcastSetup() {
   if (!net.isHost) return;
   // { ...wins } = objeto comum (o PeerJS não sabe enviar o objeto "sem protótipo" usado aqui dentro)
-  net.broadcast({ type: 'setup', song: state.song, mode: state.mode, queue: state.queue, wins: { ...state.wins } });
+  net.broadcast({ type: 'setup', song: state.song, mode: state.mode, queue: state.queue, pending: state.pending, wins: { ...state.wins } });
 }
 
 /* ---------- música (convidada) ---------- */
 net.on('setup', async (msg) => {
   state.mode = msg.mode;
   state.queue = msg.queue || [];
+  state.pending = Array.isArray(msg.pending) ? msg.pending : [];
   state.wins = Object.assign(Object.create(null), msg.wins || {});
   renderMode();
   renderQueue();
+  renderPending();
   renderNight();
   if (net.isHost) { renderLobby(); return; }
   if (state.song && msg.song && state.song.videoId === msg.song.videoId && state.preparedId === msg.song.videoId) { renderLobby(); return; }
   state.song = msg.song;
-  $('guest-song-hint').classList.toggle('hidden', !!state.song);
+  $('guest-song-hint').classList.add('hidden');
   if (!state.song) { $('song-card').classList.add('hidden'); renderLobby(); return; }
 
   const s = state.song;

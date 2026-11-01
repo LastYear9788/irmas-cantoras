@@ -6,7 +6,7 @@ Duelo de karaokê online. Feito por um idiota para idiotas.
 
 1. **Uma pessoa** abre o site, coloca o nome e clica em **Criar sala** → clica em **Copiar código** e manda as 4 letras pra amiga.
 2. **A amiga** abre o site, coloca o nome, clica em **Entrar na sala de uma amiga** e cola o código.
-3. Qualquer uma **cola um link do YouTube** (os outros vão pra fila), as duas clicam em **Estou pronta!** e a dona da sala clica em **Começar!**
+3. A dona da sala **cola um link do YouTube** e clica em **Adicionar**. A amiga também pode colar e clicar em **Sugerir**: a dona da sala aprova ou recusa. As aprovadas vão pra **Playlist**. As duas clicam em **Estou pronta!** e a dona da sala clica em **Começar!**
 
 Pronto. O app acha a letra sozinho, divide quem canta o quê e dá a nota no final.
 
