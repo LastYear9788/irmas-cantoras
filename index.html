@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Irmãs Cantoras</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎤</text></svg>">
-  <link rel="stylesheet" href="css/glass.css">
+  <link rel="stylesheet" href="css/glass.css?v=1">
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
-  <script type="module" src="js/app.js"></script>
+  <script type="module" src="js/app.js?v=1"></script>
 </head>
 <body>
   <!-- Fundo animado (é o que dá vida ao vidro) -->
@@ -119,17 +119,13 @@
           <p id="start-hint" class="hint center"></p>
         </div>
 
-        <div class="card glass score-explain">
-          <div class="label">🏆 Como funciona a nota</div>
-          <p class="hint">Enquanto você canta, o app escuta sua voz pelo microfone <b>60 vezes por segundo</b>, só nas <b>suas</b> partes. No final, cada uma ganha de <b>0 a 10.000 pontos</b>:</p>
-          <div class="crit-grid">
-            <div class="crit"><span class="crit-icon">💨</span><div><b>Fôlego <small>30%</small></b><p>Cantar a linha inteira, do começo ao fim, sem parar no meio.</p></div></div>
-            <div class="crit"><span class="crit-icon">🎯</span><div><b>Afinação <small>30%</small></b><p>O app descobre a nota que você está cantando e vê se ela está certinha.</p></div></div>
-            <div class="crit"><span class="crit-icon">🎙️</span><div><b>Timbre <small>20%</small></b><p>Voz limpa e firme, sem tremer nem virar sussurro ou chiado.</p></div></div>
-            <div class="crit"><span class="crit-icon">⏱️</span><div><b>Ritmo <small>20%</small></b><p>Começar a cantar na hora certa, junto com a letra.</p></div></div>
-          </div>
-          <p class="hint">💡 Cantar em silêncio não vale, e gritar também não ajuda. O segredo é cantar firme e afinada!</p>
-        </div>
+        <p class="score-foot">
+          🏆 A nota vai de 0 a 10.000 e soma
+          <span title="Cantar a linha inteira, sem parar no meio">💨 Fôlego</span> ·
+          <span title="Se a nota que você canta está certinha">🎯 Afinação</span> ·
+          <span title="Voz limpa e firme, sem tremer">🎙️ Timbre</span> ·
+          <span title="Começar a cantar na hora certa">⏱️ Ritmo</span>
+        </p>
       </div>
     </section>
 
