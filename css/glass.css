@@ -350,3 +350,20 @@ main { position: relative; z-index: 2; min-height: 100vh; }
 .night-score { font-size: 14px; color: rgba(255,255,255,0.85); text-align: center; padding: 10px 16px; border-radius: 16px; background: rgba(255,209,102,0.08); border: 1px solid rgba(255,209,102,0.25); }
 .player-list .wins { font-size: 13px; color: #ffd166; font-weight: 700; margin-right: 6px; }
 .row.wrap { flex-wrap: wrap; }
+
+/* ---------- câmera e mural de fotos ---------- */
+.cam-box { display: flex; align-items: center; gap: 12px; }
+.cam-preview { width: 80px; height: 60px; object-fit: cover; border-radius: 12px; transform: scaleX(-1); border: 1px solid rgba(255,255,255,0.25); background: #000; }
+.photo-wall { width: 100%; text-align: left; }
+.photo-grid { display: flex; gap: 10px; overflow-x: auto; padding: 6px 2px 10px; scroll-snap-type: x mandatory; }
+.photo { position: relative; flex: none; width: 140px; scroll-snap-align: start; border-radius: 16px; overflow: hidden; border: 2px solid var(--c, rgba(255,255,255,0.3)); background: rgba(0,0,0,0.3); animation: appear 0.5s var(--spring) both; }
+.photo img { display: block; width: 100%; height: 105px; object-fit: cover; }
+.photo .p-cap { display: flex; justify-content: space-between; align-items: center; gap: 6px; padding: 5px 8px; font-size: 12px; }
+.photo .p-name { font-weight: 700; color: var(--c, #fff); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.photo .p-label { color: var(--muted); white-space: nowrap; }
+.photo .p-actions { position: absolute; top: 6px; right: 6px; display: flex; gap: 4px; opacity: 0; transition: opacity 0.2s; }
+.photo:hover .p-actions { opacity: 1; }
+.photo .p-actions a, .photo .p-actions button {
+  width: 28px; height: 28px; border-radius: 50%; border: 0; cursor: pointer; display: grid; place-items: center;
+  background: rgba(0,0,0,0.55); color: #fff; font-size: 14px; text-decoration: none;
+}

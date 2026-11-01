@@ -4,9 +4,9 @@ Duelo de karaokê online. Feito por um idiota para idiotas.
 
 ## Como jogar (3 passos)
 
-1. **Uma pessoa** abre o site, coloca o nome e clica em **Criar sala** → clica em **Copiar convite** e manda o link pra amiga.
-2. **A amiga** abre o link, coloca o nome e clica em **Entrar**.
-3. A dona da sala **cola um link do YouTube**, as duas clicam em **Estou pronta!** e a dona clica em **Começar!**
+1. **Uma pessoa** abre o site, coloca o nome e clica em **Criar sala** → clica em **Copiar código** e manda as 4 letras pra amiga.
+2. **A amiga** abre o site, coloca o nome, clica em **Entrar na sala de uma amiga** e cola o código.
+3. Qualquer uma **cola um link do YouTube** (os outros vão pra fila), as duas clicam em **Estou pronta!** e a dona da sala clica em **Começar!**
 
 Pronto. O app acha a letra sozinho, divide quem canta o quê e dá a nota no final.
 
@@ -16,6 +16,11 @@ Pronto. O app acha a letra sozinho, divide quem canta o quê e dá a nota no fin
 - Quando o navegador perguntar, **permita o microfone**.
 - Se a letra estiver adiantada ou atrasada, use os botões **− / +** embaixo da tela.
 - Se não achar a letra, tenta outro link da mesma música (clipe oficial ou "áudio oficial" costumam funcionar melhor).
+
+### Extras
+- **Câmera (opcional):** ligue no lobby e o app tira umas fotos de você cantando pra mostrar no final. Nada fica salvo; cada uma pode apagar as próprias fotos.
+- **Reações:** 👏😂🔥😍😱 durante a música.
+- **Placar da noite:** conta as vitórias enquanto a sala estiver aberta.
 
 ### Modos
 - **Revezamento**: cada uma canta um pedaço; refrão é de todas.

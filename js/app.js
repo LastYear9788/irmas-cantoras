@@ -1,10 +1,11 @@
 // Irmãs Cantoras — fluxo do app (telas, lobby, jogo, resultado)
-import { net } from './net.js?v=9';
-import * as yt from './youtube.js?v=9';
-import { findLyrics } from './lyrics.js?v=9';
-import { assignParts, ALL } from './parts.js?v=9';
-import { mic } from './mic.js?v=9';
-import { Scorer } from './score.js?v=9';
+import { net } from './net.js?v=10';
+import * as yt from './youtube.js?v=10';
+import { findLyrics } from './lyrics.js?v=10';
+import { assignParts, ALL } from './parts.js?v=10';
+import { mic } from './mic.js?v=10';
+import { Scorer } from './score.js?v=10';
+import { cam } from './cam.js?v=10';
 
 const COLORS = ['#ff5fa2', '#4fb3ff', '#ffd166', '#7cf29a'];
 const ALL_COLOR = '#b388ff';
@@ -25,6 +26,7 @@ const state = {
   queue: [],             // fila de músicas [{ videoId, by, title }]
   wins: {},              // id -> vitórias na noite
   autoStart: false,      // começar sozinha quando a próxima música carregar
+  photos: {},            // id -> fotos da rodada (só na memória)
 };
 
 /* ============================================================
@@ -118,7 +120,7 @@ $('btn-invite-join').onclick = () => doJoin(inviteCode);
 $('btn-own-room').onclick = () => { history.replaceState(null, '', location.pathname); homeMode('choose'); };
 
 // código: só letras, maiúsculas; com 4 letras + Enter já entra
-$('in-code').addEventListener('input', (e) => { e.target.value = e.target.value.toUpperCase().replace(/[^A-Z]/g, ''); });
+$('in-code').addEventListener('input', (e) => { e.target.value = e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4); });
 $('in-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('btn-join').click(); });
 $('in-name').addEventListener('keydown', (e) => {
   if (e.key !== 'Enter') return;
@@ -145,8 +147,8 @@ function enterLobby() {
 }
 
 $('btn-invite').onclick = async () => {
-  const link = `${location.origin}${location.pathname}?sala=${net.code}`;
-  try { await navigator.clipboard.writeText(link); toast('Convite copiado! Manda pra sua amiga 💌'); }
+  // só o código: a amiga abre o site, clica em "Entrar na sala de uma amiga" e cola
+  try { await navigator.clipboard.writeText(net.code); toast(`Código ${net.code} copiado! Manda pra sua amiga 💌`); }
   catch { toast('Código da sala: ' + net.code); }
 };
 
@@ -161,7 +163,7 @@ function renderLobby() {
     </li>`).join('');
 
   $('wait-hint').textContent = net.players.length < 2
-    ? (net.isHost ? 'Esperando sua amiga entrar… Clica em "Copiar convite" e manda o link pra ela.' : '')
+    ? (net.isHost ? 'Esperando sua amiga entrar… Clica em "Copiar código" e manda pra ela.' : '')
     : '';
 
   const allReady = net.players.every((p) => p.ready);
@@ -446,7 +448,11 @@ net.on('start', async (msg) => {
     round: msg.round, at: msg.at, who: msg.who, players: msg.players, myIndex,
     lines, scorer: new Scorer(lines, msg.who, myIndex),
     shift: 0, finished: false, started: false, lastLiveSent: 0,
+    shots: cam.active ? planShots(lines, msg.who, myIndex) : null,
+    myPhotos: [], peakPhoto: null, peak: 0, lastPeakShot: 0,
   };
+  state.photos = {};
+  renderPhotos();
 
   $('tap-overlay').classList.add('hidden');
   renderScoreboard();
@@ -552,7 +558,7 @@ function gameLoop(round) {
   g.active = active;
 
   const m = mic.read();
-  if (yt.isPlaying()) { g.sawPlaying = true; g.scorer.frame(active, lt, m); }
+  if (yt.isPlaying()) { g.sawPlaying = true; g.scorer.frame(active, lt, m); cameraFrame(g, active, lt, m); }
 
   if (active >= 0) setLyrics(active, k, (lt - lines[active].t) / (lines[active].end - lines[active].t));
   else setLyrics(-1, k);
@@ -743,6 +749,7 @@ function finishRound() {
   if (g.myIndex >= 0) {
     const result = g.scorer.final();
     net.broadcast({ type: 'final', round: g.round, result });
+    sendPhotos(g);
   }
   show('result');
   renderResults();
@@ -839,6 +846,122 @@ net.on('react', (msg) => {
   el.innerHTML = `<span class="r-emoji">${msg.emoji}</span><span class="r-name">${esc(name)}</span>`;
   $('reactions').appendChild(el);
   setTimeout(() => el.remove(), 3100);
+});
+
+/* ---------- câmera e fotos da rodada ---------- */
+const CAM_MSG = 'O app tira umas fotos suas cantando e mostra no final. Nada fica salvo.';
+$('btn-cam').onclick = async () => {
+  const btn = $('btn-cam'), prev = $('cam-preview'), msg = $('cam-msg');
+  msg.style.color = '';
+  if (cam.active) {
+    cam.stop(prev);
+    prev.classList.add('hidden');
+    btn.textContent = '📸 Ligar câmera';
+    btn.classList.remove('is-on');
+    msg.textContent = CAM_MSG;
+    return;
+  }
+  btn.disabled = true;
+  try {
+    await cam.start(prev);
+    prev.classList.remove('hidden');
+    btn.textContent = 'Câmera ligada ✓ (desligar)';
+    btn.classList.add('is-on');
+    msg.textContent = 'Tá se vendo aí? Então tá pronta pras fotos! 📸';
+  } catch (e) {
+    msg.textContent = e.message;
+    msg.style.color = '#ffb4c8';
+  }
+  btn.disabled = false;
+};
+
+/** escolhe os momentos das fotos: no refrão, na minha vez e esperando a vez */
+function planShots(lines, who, me) {
+  if (me < 0 || !lines.length) return [];
+  const mid = (i) => (lines[i].t + lines[i].end) / 2;
+  const pick = (pred) => {
+    const idx = lines.map((_, i) => i).filter(pred);
+    return idx.length ? idx[Math.floor(idx.length / 2)] : -1;
+  };
+  const allTogether = who.every((w) => w === ALL);
+  const shots = [];
+  const solo = pick((i) => who[i] === me);
+  const rest = pick((i) => who[i] !== me && who[i] !== ALL);
+  const chorus = pick((i) => who[i] === ALL);
+  if (solo >= 0) shots.push({ t: mid(solo), label: '🎤 Solando' });
+  if (rest >= 0) shots.push({ t: mid(rest), label: '😴 Esperando a vez' });
+  if (chorus >= 0) shots.push({ t: mid(chorus), label: allTogether ? '🎤 Cantando' : '🎶 No refrão' });
+  if (allTogether && lines.length > 6) shots.push({ t: mid(Math.floor(lines.length * 0.85)), label: '🎶 Lá pro final' });
+  return shots.sort((a, b) => a.t - b.t);
+}
+
+/** chamado todo quadro durante a música */
+function cameraFrame(g, active, lt, m) {
+  if (!cam.active || !g.shots) return;
+  for (const s of g.shots) {
+    if (!s.done && lt >= s.t) {
+      s.done = true;
+      const img = cam.snap();
+      if (img) g.myPhotos.push({ label: s.label, img });
+    }
+  }
+  // "momento mais forte": a voz mais alta numa parte minha (fica só a melhor)
+  if (active >= 0 && isMine(g.who[active]) && m.voiced && lt > 8 &&
+      m.rms > g.peak * 1.15 && performance.now() - g.lastPeakShot > 3000) {
+    g.peak = m.rms;
+    g.lastPeakShot = performance.now();
+    const img = cam.snap();
+    if (img) g.peakPhoto = { label: '🔥 Momento mais forte', img };
+  }
+}
+
+/** no fim da rodada: manda minhas fotos pra todas */
+function sendPhotos(g) {
+  if (g.myIndex < 0) return;
+  const mine = [...g.myPhotos, g.peakPhoto].filter(Boolean).slice(0, 5);
+  if (!mine.length) return;
+  const photos = mine.map((p, i) => ({ pid: `${g.round}-${i}`, label: p.label, img: p.img }));
+  net.broadcast({ type: 'photos', round: g.round, photos });
+}
+
+const IMG_OK = /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/;
+net.on('photos', (msg) => {
+  if (!state.game || msg.round !== state.game.round || !Array.isArray(msg.photos)) return;
+  state.photos[msg.from] = msg.photos
+    .filter((p) => p && typeof p.img === 'string' && p.img.length < 200000 && IMG_OK.test(p.img))
+    .slice(0, 6)
+    .map((p) => ({ pid: String(p.pid), label: String(p.label || '').slice(0, 40), img: p.img }));
+  renderPhotos();
+});
+net.on('photo-hide', (msg) => {
+  if (!state.game || msg.round !== state.game.round || !state.photos[msg.from]) return;
+  state.photos[msg.from] = state.photos[msg.from].filter((p) => p.pid !== String(msg.pid));
+  renderPhotos();
+});
+
+function renderPhotos() {
+  const g = state.game;
+  const items = [];
+  if (g) {
+    g.players.forEach((p, i) => {
+      for (const ph of state.photos[p.id] || []) items.push({ ...ph, owner: p.id, name: p.name, i });
+    });
+  }
+  $('photo-wall').classList.toggle('hidden', !items.length);
+  $('photo-grid').innerHTML = items.map((x, n) => `
+    <div class="photo" style="--c:${colorOf(x.i)}">
+      <img src="${x.img}" alt="Foto de ${esc(x.name)}">
+      <div class="p-cap"><span class="p-name">${esc(x.name)}</span><span class="p-label">${esc(x.label)}</span></div>
+      <div class="p-actions">
+        <a href="${x.img}" download="irmas-cantoras-${esc(x.name)}-${n + 1}.jpg" title="Baixar essa foto">⬇</a>
+        ${x.owner === net.myId ? `<button class="p-hide" data-pid="${esc(x.pid)}" title="Tirar essa foto (some pra todas)">✕</button>` : ''}
+      </div>
+    </div>`).join('');
+}
+$('photo-grid').addEventListener('click', (e) => {
+  const b = e.target.closest('.p-hide');
+  if (!b || !state.game) return;
+  net.broadcast({ type: 'photo-hide', round: state.game.round, pid: b.dataset.pid });
 });
 
 /* ---------- resultado: frases e medalhas ---------- */

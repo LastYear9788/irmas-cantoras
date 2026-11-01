@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Irmãs Cantoras</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎤</text></svg>">
-  <link rel="stylesheet" href="css/glass.css?v=9">
+  <link rel="stylesheet" href="css/glass.css?v=10">
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
-  <script type="module" src="js/app.js?v=9"></script>
+  <script type="module" src="js/app.js?v=10"></script>
 </head>
 <body>
   <!-- Fundo animado (é o que dá vida ao vidro) -->
@@ -48,7 +48,7 @@
         <!-- Entrar com código -->
         <div id="home-join" class="choices hidden">
           <span class="step">2. Digite o código que sua amiga mandou</span>
-          <input id="in-code" class="glass-input code-input" maxlength="4" placeholder="ABCD" autocomplete="off">
+          <input id="in-code" class="glass-input code-input" placeholder="ABCD" autocomplete="off">
           <button id="btn-join" class="btn btn-primary btn-big">Entrar na sala</button>
           <button id="btn-back" class="link">← Voltar</button>
         </div>
@@ -73,7 +73,7 @@
               <div class="label">Sala</div>
               <div id="room-code" class="room-code">----</div>
             </div>
-            <button id="btn-invite" class="btn btn-small">Copiar convite</button>
+            <button id="btn-invite" class="btn btn-small">Copiar código</button>
           </div>
           <div class="label">Jogadoras</div>
           <ul id="player-list" class="player-list"></ul>
@@ -85,6 +85,13 @@
             <button id="btn-mic" class="btn btn-small">Ativar microfone</button>
           </div>
           <p id="mic-msg" class="hint">Fale alguma coisa: a barra tem que mexer. Use fone de ouvido!</p>
+
+          <div class="label">Câmera <span class="label-soft">(opcional)</span></div>
+          <div class="cam-box">
+            <video id="cam-preview" class="cam-preview hidden" muted playsinline></video>
+            <button id="btn-cam" class="btn btn-small">📸 Ligar câmera</button>
+          </div>
+          <p id="cam-msg" class="hint">O app tira umas fotos suas cantando e mostra no final. Nada fica salvo.</p>
 
           <button id="btn-ready" class="btn btn-primary">Estou pronta!</button>
         </div>
@@ -193,6 +200,10 @@
           <button id="btn-other" class="btn btn-primary">Outra música</button>
         </div>
         <p id="result-guest" class="hint center hidden">Esperando a dona da sala…</p>
+        <div id="photo-wall" class="photo-wall hidden">
+          <div class="label">📸 Fotos da rodada</div>
+          <div id="photo-grid" class="photo-grid"></div>
+        </div>
       </div>
     </section>
   </main>
