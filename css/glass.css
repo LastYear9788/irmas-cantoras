@@ -152,7 +152,8 @@ main { position: relative; z-index: 2; min-height: 100vh; }
 .btn.is-on { background: linear-gradient(135deg, rgba(124,242,154,0.6), rgba(79,179,255,0.6)); }
 
 /* ---------- lobby ---------- */
-.lobby-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 440px)); gap: 20px; width: 100%; justify-content: center; align-items: start; }
+.lobby-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 440px)); gap: 20px; width: 100%; justify-content: center; align-items: start; }
+@media (max-width: 920px) { .lobby-grid { grid-template-columns: minmax(0, 440px); } }
 .room-head { display: flex; justify-content: space-between; align-items: center; }
 .room-code { font-size: 38px; font-weight: 800; letter-spacing: 0.25em; }
 
@@ -289,5 +290,15 @@ main { position: relative; z-index: 2; min-height: 100vh; }
 .lyrics-card.turn-other { opacity: 0.75; }
 
 /* ---------- explicação da nota (lobby): rodapé ---------- */
-.score-foot { grid-column: 1 / -1; text-align: center; font-size: 13px; color: var(--muted); }
-.score-foot span { white-space: nowrap; cursor: help; border-bottom: 1px dotted rgba(255,255,255,0.3); }
+.score-foot { text-align: center; font-size: 13px; color: var(--muted); max-width: 900px; }
+.tip-word { position: relative; white-space: nowrap; cursor: default; border-bottom: 1px dotted rgba(255,255,255,0.35); }
+.tip-word::after {  /* balãozinho que aparece na hora */
+  content: attr(data-tip); position: absolute; left: 50%; bottom: calc(100% + 10px); z-index: 30;
+  transform: translate(-50%, 6px); opacity: 0; pointer-events: none;
+  padding: 8px 12px; border-radius: 12px; white-space: nowrap; font-size: 13px; color: #fff;
+  background: rgba(30, 20, 50, 0.85); border: 1px solid rgba(255,255,255,0.2);
+  -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+  transition: opacity 0.15s, transform 0.25s var(--spring);
+}
+.tip-word:hover::after { opacity: 1; transform: translate(-50%, 0); }
