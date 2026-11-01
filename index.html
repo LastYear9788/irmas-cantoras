@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Irmãs Cantoras</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎤</text></svg>">
-  <link rel="stylesheet" href="css/glass.css?v=8">
+  <link rel="stylesheet" href="css/glass.css?v=9">
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
-  <script type="module" src="js/app.js?v=8"></script>
+  <script type="module" src="js/app.js?v=9"></script>
 </head>
 <body>
   <!-- Fundo animado (é o que dá vida ao vidro) -->
@@ -93,8 +93,8 @@
           <div class="label">Música</div>
           <div id="host-song-controls">
             <div class="row">
-              <input id="in-url" class="glass-input" placeholder="Cole o link do YouTube aqui" autocomplete="off">
-              <button id="btn-load" class="btn">Buscar</button>
+              <input id="in-url" class="glass-input" placeholder="Cole um link do YouTube aqui" autocomplete="off">
+              <button id="btn-load" class="btn">Adicionar</button>
             </div>
             <p class="tip">💡 <b>Dica:</b> quer cantar sem a voz do cantor? No YouTube, procure o nome da música + <b>karaokê</b> e cole esse link aqui.</p>
           </div>
@@ -106,6 +106,12 @@
               <div id="song-title" class="song-title"></div>
               <div id="song-status" class="song-status"></div>
             </div>
+            <button id="btn-skip" class="link skip-btn hidden" title="Pular essa música">Pular</button>
+          </div>
+
+          <div id="queue-box" class="hidden">
+            <div class="label">Próximas na fila</div>
+            <ul id="queue-list" class="queue-list"></ul>
           </div>
 
           <div class="label">Modo</div>
@@ -159,6 +165,15 @@
         <button id="btn-end" class="btn btn-small">Encerrar</button>
       </div>
 
+      <div class="glass pill react-pill" title="Mande uma reação pras amigas">
+        <button class="react" data-e="👏">👏</button>
+        <button class="react" data-e="😂">😂</button>
+        <button class="react" data-e="🔥">🔥</button>
+        <button class="react" data-e="😍">😍</button>
+        <button class="react" data-e="😱">😱</button>
+      </div>
+      <div id="reactions" class="reactions" aria-hidden="true"></div>
+
       <div id="countdown" class="overlay hidden"><div id="countdown-num" class="countdown-num">3</div></div>
       <div id="tap-overlay" class="overlay hidden">
         <button id="btn-tap" class="btn btn-primary btn-big">▶ Clique para começar</button>
@@ -172,9 +187,10 @@
         <h2 id="result-title" class="title small">Resultado</h2>
         <div id="result-list" class="result-list"></div>
         <p id="result-wait" class="hint center"></p>
-        <div id="result-host" class="row center">
-          <button id="btn-rematch" class="btn btn-primary">Revanche</button>
-          <button id="btn-other" class="btn">Outra música</button>
+        <p id="night-score" class="night-score hidden"></p>
+        <div id="result-host" class="row center wrap">
+          <button id="btn-rematch" class="btn">Revanche</button>
+          <button id="btn-other" class="btn btn-primary">Outra música</button>
         </div>
         <p id="result-guest" class="hint center hidden">Esperando a dona da sala…</p>
       </div>

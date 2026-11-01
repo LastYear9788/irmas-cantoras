@@ -187,7 +187,7 @@ function onGuestConnection(c) {
   });
 }
 
-const GUEST_CAN_SEND = new Set(['live', 'final']);
+const GUEST_CAN_SEND = new Set(['live', 'final', 'enqueue', 'react']);
 
 /**
  * "Sinal de vida": a cada 2s manda um oi; se a outra ponta passar 12s sem responder, ela saiu.

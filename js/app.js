@@ -1,10 +1,10 @@
 // Irmãs Cantoras — fluxo do app (telas, lobby, jogo, resultado)
-import { net } from './net.js?v=8';
-import * as yt from './youtube.js?v=8';
-import { findLyrics } from './lyrics.js?v=8';
-import { assignParts, ALL } from './parts.js?v=8';
-import { mic } from './mic.js?v=8';
-import { Scorer } from './score.js?v=8';
+import { net } from './net.js?v=9';
+import * as yt from './youtube.js?v=9';
+import { findLyrics } from './lyrics.js?v=9';
+import { assignParts, ALL } from './parts.js?v=9';
+import { mic } from './mic.js?v=9';
+import { Scorer } from './score.js?v=9';
 
 const COLORS = ['#ff5fa2', '#4fb3ff', '#ffd166', '#7cf29a'];
 const ALL_COLOR = '#b388ff';
@@ -22,6 +22,9 @@ const state = {
   game: null,            // dados da rodada atual
   finals: {},            // id -> resultado final
   live: {},              // id -> pontuação ao vivo
+  queue: [],             // fila de músicas [{ videoId, by, title }]
+  wins: {},              // id -> vitórias na noite
+  autoStart: false,      // começar sozinha quando a próxima música carregar
 };
 
 /* ============================================================
@@ -129,8 +132,7 @@ $('in-name').addEventListener('keydown', (e) => {
 function enterLobby() {
   $('home-msg').textContent = '';
   $('room-code').textContent = net.code;
-  $('host-song-controls').classList.toggle('hidden', !net.isHost);
-  $('guest-song-hint').classList.toggle('hidden', net.isHost || !!state.song);
+  $('guest-song-hint').classList.add('hidden');
   $('mode-toggle').classList.toggle('locked', !net.isHost);
   $('btn-start').classList.toggle('hidden', !net.isHost);
   $('btn-end').classList.toggle('hidden', !net.isHost);
@@ -154,6 +156,7 @@ function renderLobby() {
     <li style="color:${colorOf(i)}">
       <span class="dot"></span>
       <span class="pname" style="color:var(--text)">${esc(p.name)} ${p.id === net.myId ? '<span class="you">(você)</span>' : ''}</span>
+      ${state.wins[p.id] ? `<span class="wins" title="Vitórias hoje">🏆 ${state.wins[p.id]}</span>` : ''}
       <span class="status ${p.ready ? 'ok' : ''}">${p.ready ? 'Pronta ✓' : 'Esperando…'}</span>
     </li>`).join('');
 
@@ -166,11 +169,11 @@ function renderLobby() {
   $('btn-start').disabled = !(allReady && hasSong);
   let hint = '';
   if (net.isHost) {
-    if (!hasSong) hint = 'Cola um link do YouTube pra escolher a música.';
+    if (!hasSong) hint = loadingId ? (state.autoStart ? 'Carregando a próxima… começa sozinha 🎶' : 'Carregando a música…') : 'Cola um link do YouTube pra escolher a música.';
     else if (!allReady) hint = 'Esperando todas clicarem em "Estou pronta!".';
     else if (net.players.length < 2) hint = 'Dá pra começar sozinha pra treinar!';
   } else {
-    hint = allReady && hasSong ? 'Esperando a dona da sala começar…' : '';
+    hint = !hasSong ? 'Cola um link pra sugerir uma música 🎶' : allReady ? 'Esperando a dona da sala começar…' : '';
   }
   $('start-hint').textContent = hint;
   $('start-hint').classList.toggle('hidden', !hint);
@@ -228,22 +231,67 @@ $('btn-ready').onclick = async () => {
   renderLobby();
 };
 
-/* ---------- música (host) ---------- */
-$('btn-load').onclick = loadSong;
-$('in-url').addEventListener('keydown', (e) => { if (e.key === 'Enter') loadSong(); });
-$('in-url').addEventListener('paste', () => setTimeout(loadSong, 50));
+/* ---------- música + fila (qualquer uma cola link; a dona da sala organiza) ---------- */
+$('btn-load').onclick = submitLink;
+$('in-url').addEventListener('keydown', (e) => { if (e.key === 'Enter') submitLink(); });
+$('in-url').addEventListener('paste', () => setTimeout(submitLink, 50));
+
+const myName = () => (net.players.find((p) => p.id === net.myId) || {}).name || 'Alguém';
+
+function submitLink() {
+  const raw = $('in-url').value.trim();
+  if (!raw) return;
+  const id = yt.extractVideoId(raw);
+  if (!id) { toast('Esse link não parece do YouTube 🤔'); return; }
+  $('in-url').value = '';
+  const busy = !!(state.song || loadingId || state.queue.length);
+  if (net.isHost) enqueue(id, myName());
+  else net.broadcast({ type: 'enqueue', videoId: id });
+  toast(busy ? 'Adicionada na fila 🎶' : 'Carregando a música… 🎶');
+}
+
+// convidada mandou uma música: só a dona da sala coloca na fila
+net.on('enqueue', (msg) => {
+  if (!net.isHost || msg.from === net.myId) return;
+  const id = yt.extractVideoId(String(msg.videoId || ''));
+  const who = net.players.find((p) => p.id === msg.from);
+  if (id && who) enqueue(id, who.name);
+});
+
+function enqueue(id, by) {
+  if (state.queue.length >= 20) { toast('A fila tá cheia (20 músicas) 😅'); return; }
+  const item = { videoId: id, by, title: 'Vídeo do YouTube' };
+  state.queue.push(item);
+  broadcastSetup();
+  fetchTitle(item);
+  maybeLoadNext();
+}
+
+// nome do vídeo só pra mostrar na fila (se não conseguir, fica "Vídeo do YouTube")
+async function fetchTitle(item) {
+  try {
+    const r = await fetch('https://noembed.com/embed?url=' + encodeURIComponent('https://www.youtube.com/watch?v=' + item.videoId));
+    const d = await r.json();
+    if (d && d.title) { item.title = d.title; broadcastSetup(); }
+  } catch (e) { /* tudo bem */ }
+}
+
+/** (dona da sala) sem música atual? puxa a próxima da fila */
+function maybeLoadNext() {
+  if (!net.isHost || state.song || loadingId || state.game || !state.queue.length) return;
+  const item = state.queue.shift();
+  broadcastSetup();
+  loadSong(item.videoId);
+}
 
 let loadingId = null;
-async function loadSong() {
-  const id = yt.extractVideoId($('in-url').value);
-  if (!id) { toast('Esse link não parece do YouTube 🤔'); return; }
-  if (loadingId === id || (state.song && state.song.videoId === id)) return;
+async function loadSong(id) {
   loadingId = id;
-  $('btn-load').disabled = true;
   state.song = null;
   broadcastSetup();
   songCard(id, 'Carregando…', 'Abrindo o vídeo…', '');
 
+  let ok = false;
   try {
     const info = await yt.prepare(id);
     if (loadingId !== id) return;
@@ -252,21 +300,66 @@ async function loadSong() {
     const ly = await findLyrics(info.title, info.author, info.duration);
     if (loadingId !== id) return;
     state.song = { videoId: id, title: info.title, lines: ly.lines, artist: ly.artist, track: ly.track };
-    if (ly.diff > 8) songCard(id, info.title, `Letra encontrada ✓ (${ly.artist} – ${ly.track}). ⚠️ Esse vídeo tem partes a mais que a música, a letra pode ficar fora do tempo. Se der, usa o link do "áudio oficial".`, 'ok');
-    else songCard(id, info.title, `Letra encontrada ✓ (${ly.artist} – ${ly.track})`, 'ok');
-    broadcastSetup();
+    if (ly.diff > 8) songCard(id, info.title, `Letra encontrada ✓ (${songName(ly)}). ⚠️ Esse vídeo tem partes a mais que a música, a letra pode ficar fora do tempo. Se der, usa o link do "áudio oficial".`, 'ok');
+    else songCard(id, info.title, `Letra encontrada ✓ (${songName(ly)})`, 'ok');
+    ok = true;
   } catch (e) {
     if (loadingId !== id) return;
     songCard(id, $('song-title').textContent, e.message, 'bad');
   } finally {
     if (loadingId === id) loadingId = null;
-    $('btn-load').disabled = false;
     renderLobby();
+  }
+
+  broadcastSetup();
+  if (ok) {
+    // veio do "Próxima música": começa sozinha se todas continuam prontas
+    if (state.autoStart) {
+      state.autoStart = false;
+      if (net.players.every((p) => p.ready)) setTimeout(() => { if (!state.game && state.song && state.song.videoId === id) startRound(); }, 1500);
+    }
+  } else if (state.queue.length) {
+    // não deu pra tocar essa? pula pra próxima da fila
+    toast('Não deu pra usar essa música, indo pra próxima da fila…', 4000);
+    setTimeout(() => { if (!state.song && !loadingId) maybeLoadNext(); }, 3000);
+  } else {
+    state.autoStart = false;
   }
 }
 
+// (dona da sala) pular a música atual
+$('btn-skip').onclick = () => {
+  if (!net.isHost || state.game) return;
+  loadingId = null;
+  state.song = null;
+  $('song-card').classList.add('hidden');
+  broadcastSetup();
+  maybeLoadNext();
+  renderLobby();
+};
+
+function renderQueue() {
+  $('queue-box').classList.toggle('hidden', !state.queue.length);
+  $('queue-list').innerHTML = state.queue.map((q, i) => `
+    <li>
+      <img src="${yt.thumbUrl(q.videoId)}" alt="">
+      <div class="q-info"><div class="q-title">${esc(q.title)}</div><div class="q-by">por ${esc(q.by)}</div></div>
+      ${net.isHost ? `<button class="q-del" data-i="${i}" title="Tirar da fila">✕</button>` : ''}
+    </li>`).join('');
+  $('btn-skip').classList.toggle('hidden', !net.isHost || $('song-card').classList.contains('hidden'));
+}
+$('queue-list').addEventListener('click', (e) => {
+  const b = e.target.closest('.q-del');
+  if (!b || !net.isHost) return;
+  state.queue.splice(+b.dataset.i, 1);
+  broadcastSetup();
+});
+
+const songName = (x) => (x.artist ? `${x.artist} – ` : '') + x.track;
+
 function songCard(id, title, status, cls) {
   $('song-card').classList.remove('hidden');
+  $('btn-skip').classList.toggle('hidden', !net.isHost);
   $('song-thumb').src = yt.thumbUrl(id);
   $('song-title').textContent = title;
   $('song-status').textContent = status;
@@ -275,27 +368,32 @@ function songCard(id, title, status, cls) {
 
 function broadcastSetup() {
   if (!net.isHost) return;
-  net.broadcast({ type: 'setup', song: state.song, mode: state.mode });
+  net.broadcast({ type: 'setup', song: state.song, mode: state.mode, queue: state.queue, wins: state.wins });
 }
 
 /* ---------- música (convidada) ---------- */
 net.on('setup', async (msg) => {
   state.mode = msg.mode;
+  state.queue = msg.queue || [];
+  state.wins = msg.wins || {};
   renderMode();
-  if (net.isHost) return;
+  renderQueue();
+  renderNight();
+  if (net.isHost) { renderLobby(); return; }
+  if (state.song && msg.song && state.song.videoId === msg.song.videoId && state.preparedId === msg.song.videoId) { renderLobby(); return; }
   state.song = msg.song;
   $('guest-song-hint').classList.toggle('hidden', !!state.song);
   if (!state.song) { $('song-card').classList.add('hidden'); renderLobby(); return; }
 
   const s = state.song;
   if (state.preparedId === s.videoId) {
-    songCard(s.videoId, s.title, `Letra encontrada ✓ (${s.artist} – ${s.track})`, 'ok');
+    songCard(s.videoId, s.title, `Letra encontrada ✓ (${songName(s)})`, 'ok');
   } else {
     songCard(s.videoId, s.title, 'Preparando o vídeo…', '');
     try {
       await yt.prepare(s.videoId);
       state.preparedId = s.videoId;
-      songCard(s.videoId, s.title, `Letra encontrada ✓ (${s.artist} – ${s.track})`, 'ok');
+      songCard(s.videoId, s.title, `Letra encontrada ✓ (${songName(s)})`, 'ok');
     } catch (e) {
       if (e.message === 'cancelado') return;
       songCard(s.videoId, s.title, e.message, 'bad');
@@ -667,6 +765,14 @@ function renderResults() {
 
   const top = done[0];
   const tie = done.length > 1 && done[1].r.total === top.r.total;
+  if (complete && net.isHost && !g.counted) {
+    g.counted = true;
+    if (top && !tie && rows.length > 1 && top.r.total > 0) {
+      state.wins[top.id] = (state.wins[top.id] || 0) + 1;
+      broadcastSetup();
+    }
+  }
+  const medals = complete ? medalsFor(done) : {};
   if (!complete) {
     $('result-crown').textContent = '⏳';
     $('result-title').textContent = 'Calculando…';
@@ -695,6 +801,8 @@ function renderResults() {
         <span class="pname">${esc(x.name)}${x.id === net.myId ? ' <span class="hint">(você)</span>' : ''}</span>
         <span class="ptotal">${x.r.total.toLocaleString('pt-BR')}</span>
       </div>
+      <div class="result-phrase">${phraseFor(x.r.total)}</div>
+      ${medals[x.id] ? `<span class="medal">${medals[x.id]}</span>` : ''}
       <div class="bars">
         ${bar('💨 Fôlego', x.r.presence)}
         ${bar('🎯 Afinação', x.r.tune)}
@@ -706,19 +814,97 @@ function renderResults() {
   $('result-wait').textContent = missing.length && !g.timeout
     ? `Esperando a nota de ${missing.map((x) => x.name).join(', ')}…`
     : (missing.length ? `${missing.map((x) => x.name).join(', ')} não mandou a nota.` : '');
+  renderNight();
+}
+
+/* ---------- reações ao vivo ---------- */
+const REACTIONS = ['👏', '😂', '🔥', '😍', '😱'];
+let lastReact = 0;
+document.querySelectorAll('.react').forEach((b) => {
+  b.onclick = () => {
+    const now = Date.now();
+    if (now - lastReact < 400 || !state.game) return;   // sem metralhadora de emoji
+    lastReact = now;
+    net.broadcast({ type: 'react', emoji: b.dataset.e });
+  };
+});
+net.on('react', (msg) => {
+  if (!state.game || !REACTIONS.includes(msg.emoji)) return;
+  const idx = state.game.players.findIndex((p) => p.id === msg.from);
+  const name = idx >= 0 ? state.game.players[idx].name : '';
+  const el = document.createElement('div');
+  el.className = 'reaction';
+  el.style.left = (8 + Math.random() * 80) + '%';
+  el.style.setProperty('--c', idx >= 0 ? colorOf(idx) : '#fff');
+  el.innerHTML = `<span class="r-emoji">${msg.emoji}</span><span class="r-name">${esc(name)}</span>`;
+  $('reactions').appendChild(el);
+  setTimeout(() => el.remove(), 3100);
+});
+
+/* ---------- resultado: frases e medalhas ---------- */
+function phraseFor(total) {
+  if (total >= 9000) return 'Diva absoluta 👑';
+  if (total >= 8000) return 'Arrasou! Já pode lançar álbum 💿';
+  if (total >= 7000) return 'Mandou muito bem 🎶';
+  if (total >= 6000) return 'Ensaiou no chuveiro, né? 🚿';
+  if (total >= 4500) return 'Tá quase lá… bora de novo 😅';
+  if (total >= 3000) return 'O microfone tava ligado? 🎤';
+  if (total > 0) return 'Melhor nem comentar 🙈';
+  return 'Ficou só olhando a letra 👀';
+}
+
+const MEDAL_CATS = [
+  // [quesito, medalha de quem foi a melhor, medalha engraçada de quem foi pior]
+  ['tune', '🎯 Mais afinada', '🎲 Afinação criativa'],
+  ['presence', '💨 Maior fôlego', '🤫 Cantou no modo silencioso'],
+  ['timbre', '🎙️ Voz mais firme', '🌬️ Voz tremidinha'],
+  ['rhythm', '⏱️ Rainha do ritmo', '🐢 Entrou atrasada em tudo'],
+];
+/** uma medalha pra cada (só quando tem 2 ou mais) */
+function medalsFor(done) {
+  const out = {};
+  if (done.length < 2) return out;
+  for (const [k, good] of MEDAL_CATS) {
+    const sorted = [...done].sort((a, b) => b.r[k] - a.r[k]);
+    if (sorted[0].r[k] > sorted[1].r[k] && !out[sorted[0].id]) out[sorted[0].id] = good;
+  }
+  for (const x of done) {
+    if (out[x.id]) continue;
+    if (x.r.total === 0) { out[x.id] = '😶 Modo plateia'; continue; }
+    const worst = MEDAL_CATS.reduce((w, c) => (x.r[c[0]] < x.r[w[0]] ? c : w));
+    out[x.id] = worst[2];
+  }
+  return out;
+}
+
+/** "Placar da noite: Ana 3 · Bia 2" */
+function renderNight() {
+  const el = $('night-score');
+  const ps = net.players.filter((p) => true);
+  const any = ps.some((p) => state.wins[p.id]);
+  el.classList.toggle('hidden', !any || ps.length < 2);
+  el.textContent = '🏆 Placar da noite: ' + ps.map((p) => `${p.name} ${state.wins[p.id] || 0}`).join(' · ');
+  renderResultButtons();
+}
+
+function renderResultButtons() {
+  const next = state.queue[0];
+  $('btn-other').textContent = next ? `▶ Próxima: ${next.title.length > 28 ? next.title.slice(0, 28) + '…' : next.title}` : 'Outra música';
 }
 
 $('btn-rematch').onclick = () => startRound();
-$('btn-other').onclick = () => net.broadcast({ type: 'lobby' });
-net.on('lobby', () => {
+$('btn-other').onclick = () => net.broadcast({ type: 'lobby', autoStart: state.queue.length > 0 });
+net.on('lobby', (msg) => {
   state.game = null;
   document.body.classList.remove('playing');
   yt.pause();
   if (net.isHost) {
     state.song = null;
+    state.autoStart = !!msg.autoStart;
     $('in-url').value = '';
     $('song-card').classList.add('hidden');
     broadcastSetup();
+    maybeLoadNext();
   }
   renderLobby();
   show('lobby');
