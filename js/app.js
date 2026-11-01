@@ -386,10 +386,46 @@ function countdown(round) {
     const el = $('countdown-num');
     const txt = n > 3 ? '🎤' : String(n);
     if (el.textContent !== txt) { el.textContent = txt; el.style.animation = 'none'; void el.offsetWidth; el.style.animation = ''; }
-    requestAnimationFrame(tick);
+    // setTimeout (e não requestAnimationFrame) porque continua rodando com a janela minimizada
+    setTimeout(tick, Math.min(100, left));
   };
   tick();
+  heartbeat(round);
 }
+
+/**
+ * Uma vez por segundo (funciona até minimizado): mantém o vídeo no mesmo tempo
+ * que o das outras e confere se a música acabou.
+ */
+function heartbeat(round) {
+  const iv = setInterval(() => {
+    const g = state.game;
+    if (!g || g.round !== round || g.finished) return clearInterval(iv);
+    syncVideo(g);
+    checkEnd(g);
+  }, 1000);
+}
+
+function syncVideo(g) {
+  if (!g.started || g.finished) return;
+  const expected = (net.hostNow() - g.at) / 1000;   // onde o vídeo deveria estar
+  if (expected < 0 || expected > yt.duration()) return;
+  const st = yt.state();
+  if (st === 3) return;                              // carregando: espera
+  if (Math.abs(yt.time() - expected) > 0.5) yt.seek(expected);
+  if (st !== 1 && $('tap-overlay').classList.contains('hidden')) yt.play();
+}
+
+function checkEnd(g) {
+  if (!g.started) return;
+  const last = g.lines[g.lines.length - 1];
+  if (yt.state() === 0 || yt.time() - g.shift > last.end + 6) finishRound();
+}
+
+// voltou pra janela? acerta o tempo na hora
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && state.game) syncVideo(state.game);
+});
 
 $('btn-tap').onclick = () => {
   const g = state.game; if (!g) return;
@@ -429,9 +465,7 @@ function gameLoop(round) {
     if (g.myIndex >= 0) net.broadcast({ type: 'live', round: g.round, score });
   }
 
-  // fim: vídeo acabou, ou 6s depois da última linha
-  const last = lines[lines.length - 1];
-  if (yt.state() === 0 || lt > last.end + 6) finishRound();
+  checkEnd(g);   // fim: vídeo acabou, ou 6s depois da última linha
 }
 
 let lastRendered = '';
