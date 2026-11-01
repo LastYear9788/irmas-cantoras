@@ -24,6 +24,13 @@ function randomCode() {
 
 const NO_PEER = 'Não consegui carregar o sistema de salas. Confere a internet e recarrega a página (F5).';
 const handlers = {};
+
+/** "crachá" deste navegador/aba: se der F5 e voltar, a sala sabe que é a mesma pessoa */
+function clientToken() {
+  let t = sessionStorage.getItem('ic-token');
+  if (!t) { t = Math.random().toString(36).slice(2) + Date.now().toString(36); sessionStorage.setItem('ic-token', t); }
+  return t;
+}
 let peer = null;
 let hostConn = null;        // (convidada) conexão com a host
 const conns = new Map();    // (host) peerId -> conexão
@@ -64,7 +71,7 @@ export const net = {
           net.isHost = true;
           net.myId = id;
           net.code = code;
-          net.players = [{ id, name, ready: false }];
+          net.players = [{ id, name: cleanName(name), ready: false }];
           p.on('connection', onGuestConnection);
           p.on('disconnected', () => p.reconnect());
           emit('players', net.players);
@@ -105,11 +112,13 @@ export const net = {
           net.isHost = false;
           net.myId = id;
           net.code = code;
-          safeSend(c, { type: 'hello', name });
+          safeSend(c, { type: 'hello', name, token: clientToken() });
           syncClock();
           resolve(code);
         });
         c.on('data', (msg) => {
+          if (!msg || typeof msg !== 'object' || typeof msg.type !== 'string') return;
+          if (msg.type === 'full') { net.full = true; return emit('full'); }
           if (msg.type === 'hb') return safeSend(c, { type: 'hbr' });
           if (msg.type === 'hbr') return;
           if (msg.type === 'pong') return onPong(msg);
@@ -145,15 +154,35 @@ function pushPlayers() {
   emit('players', net.players);
 }
 
+const ROOM_LIMIT = 10;   // proteção contra alguém lotar a sala com conexões falsas
+
 function onGuestConnection(c) {
   c.on('data', (msg) => {
+    if (!msg || typeof msg !== 'object' || typeof msg.type !== 'string') return;   // mensagem esquisita: ignora
     switch (msg.type) {
-      case 'hello':
+      case 'hello': {
+        if (net.players.some((p) => p.id === c.peer)) break;          // "oi" repetido: ignora
+        if (net.players.length >= ROOM_LIMIT && !net.players.some((p) => p.token && p.token === String(msg.token || ''))) {
+          safeSend(c, { type: 'full' });
+          setTimeout(() => { try { c.close(); } catch (e) { /* ok */ } }, 500);
+          break;
+        }
+        // voltou depois de um F5? (mesmo "crachá" do navegador) -> tira a versão antiga
+        const token = String(msg.token || '').slice(0, 40);
+        const old = token && net.players.find((p) => p.token === token);
+        if (old) {
+          const oc = conns.get(old.id);
+          conns.delete(old.id);
+          net.players = net.players.filter((p) => p.id !== old.id);
+          try { if (oc) oc.close(); } catch (e) { /* já fechou */ }
+          emit('guestreplaced', { oldId: old.id, newId: c.peer });
+        }
         conns.set(c.peer, c);
-        net.players.push({ id: c.peer, name: String(msg.name || 'Amiga').slice(0, 16), ready: false });
+        net.players.push({ id: c.peer, name: uniqueName(cleanName(msg.name)), ready: false, token });
         pushPlayers();
         emit('guestjoined', c.peer);
         break;
+      }
       case 'ping':
         safeSend(c, { type: 'pong', t0: msg.t0, th: Date.now() });
         break;
@@ -169,7 +198,7 @@ function onGuestConnection(c) {
       }
       default:
         // convidadas só podem mandar a nota ao vivo e a final (comandos de jogo são só da dona da sala)
-        if (msg._relay && GUEST_CAN_SEND.has(msg.type)) {
+        if (msg._relay && GUEST_CAN_SEND.has(msg.type) && sizeOk(msg)) {
           delete msg._relay;
           msg.from = c.peer;
           deliver(msg);
@@ -185,6 +214,23 @@ function onGuestConnection(c) {
     if (pl) emit('guestleft', pl);
     try { c.close(); } catch (e) { /* já fechou */ }
   });
+}
+
+/** nome limpo: sem caracteres invisíveis, sem espaços sobrando, até 16 letras */
+export function cleanName(x) {
+  const n = String(x || '').replace(/[ --​-‏‪-‮⁠-⁯]/g, '').replace(/\s+/g, ' ').trim();
+  return [...n].slice(0, 16).join('') || 'Amiga';
+}
+/** duas com o mesmo nome? a segunda vira "Bia 2" */
+function uniqueName(name) {
+  const taken = (n) => net.players.some((p) => p.name.toLowerCase() === n.toLowerCase());
+  if (!taken(name)) return name;
+  for (let i = 2; ; i++) { const n = [...name].slice(0, 13).join('') + ' ' + i; if (!taken(n)) return n; }
+}
+/** tamanho máximo das mensagens que a dona da sala repassa (evita alguém travar a sala de propósito) */
+const MAX_SIZE = { photos: 1300000 };
+function sizeOk(msg) {
+  try { return JSON.stringify(msg).length <= (MAX_SIZE[msg.type] || 4000); } catch (e) { return false; }
 }
 
 const GUEST_CAN_SEND = new Set(['live', 'final', 'enqueue', 'react', 'photos', 'photo-hide']);

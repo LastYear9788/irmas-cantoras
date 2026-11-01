@@ -6,6 +6,7 @@ const W = 320, H = 240;
 
 export const cam = {
   active: false,
+  onLost: null,
 
   /** liga a câmera e mostra a prévia no elemento <video> passado */
   async start(preview) {
@@ -29,6 +30,10 @@ export const cam = {
     await video.play().catch(() => {});
     if (preview) { preview.srcObject = stream; preview.play().catch(() => {}); }
     cam.active = true;
+    stream.getVideoTracks().forEach((t) => t.addEventListener('ended', () => {
+      cam.stop(preview);
+      if (cam.onLost) cam.onLost();
+    }));
   },
 
   stop(preview) {

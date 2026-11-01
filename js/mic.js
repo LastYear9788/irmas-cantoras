@@ -7,6 +7,7 @@ let lastClarity = 0;
 
 export const mic = {
   active: false,
+  onLost: null,
 
   async start() {
     if (mic.active) return;
@@ -27,6 +28,13 @@ export const mic = {
     buf = new Float32Array(analyser.fftSize);
     mic.active = true;
     calibrate();
+    // fio puxado / fone bluetooth desligou
+    stream.getAudioTracks().forEach((t) => t.addEventListener('ended', () => {
+      mic.active = false;
+      last = null;
+      try { ctx.close(); } catch (e) { /* ok */ }
+      if (mic.onLost) mic.onLost();
+    }));
   },
 
   /** Lê o microfone agora. { rms, level (0-1 pra barra), pitch (Hz ou 0), voiced } */

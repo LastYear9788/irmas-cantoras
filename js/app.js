@@ -1,11 +1,11 @@
 // Irmãs Cantoras — fluxo do app (telas, lobby, jogo, resultado)
-import { net } from './net.js?v=10';
-import * as yt from './youtube.js?v=10';
-import { findLyrics } from './lyrics.js?v=10';
-import { assignParts, ALL } from './parts.js?v=10';
-import { mic } from './mic.js?v=10';
-import { Scorer } from './score.js?v=10';
-import { cam } from './cam.js?v=10';
+import { net } from './net.js?v=11';
+import * as yt from './youtube.js?v=11';
+import { findLyrics } from './lyrics.js?v=11';
+import { assignParts, ALL } from './parts.js?v=11';
+import { mic } from './mic.js?v=11';
+import { Scorer } from './score.js?v=11';
+import { cam } from './cam.js?v=11';
 
 const COLORS = ['#ff5fa2', '#4fb3ff', '#ffd166', '#7cf29a'];
 const ALL_COLOR = '#b388ff';
@@ -21,12 +21,12 @@ const state = {
   ready: false,
   round: 0,
   game: null,            // dados da rodada atual
-  finals: {},            // id -> resultado final
-  live: {},              // id -> pontuação ao vivo
+  finals: Object.create(null),   // id -> resultado final
+  live: Object.create(null),     // id -> pontuação ao vivo
   queue: [],             // fila de músicas [{ videoId, by, title }]
-  wins: {},              // id -> vitórias na noite
+  wins: Object.create(null),     // id -> vitórias na noite
   autoStart: false,      // começar sozinha quando a próxima música carregar
-  photos: {},            // id -> fotos da rodada (só na memória)
+  photos: Object.create(null),   // id -> fotos da rodada (só na memória)
 };
 
 /* ============================================================
@@ -49,7 +49,10 @@ function toast(text, ms = 3500) {
    INÍCIO
    ============================================================ */
 const params = new URLSearchParams(location.search);
-const inviteCode = (params.get('sala') || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4);
+const fromLink = (params.get('sala') || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4);
+const lastRoom = (sessionStorage.getItem('ic-room') || '').replace(/[^A-Z]/g, '').slice(0, 4);
+const inviteCode = fromLink.length === 4 ? fromLink : lastRoom;
+const isRejoin = fromLink.length !== 4 && lastRoom.length === 4;
 $('in-name').value = localStorage.getItem('ic-name') || '';
 
 /** mostra só um "caminho" por vez: escolher / digitar código / convite */
@@ -58,9 +61,11 @@ function homeMode(mode) {
   $('home-join').classList.toggle('hidden', mode !== 'join');
   $('home-invite').classList.toggle('hidden', mode !== 'invite');
   $('home-msg').textContent = '';
-  $('home-sub').innerHTML = mode === 'invite'
-    ? `Você foi convidada pra sala <span class="invite-code">${inviteCode}</span> 🎉`
-    : 'Duelo de karaokê. Quem canta melhor?';
+  $('home-sub').innerHTML = mode !== 'invite' ? 'Duelo de karaokê. Quem canta melhor?'
+    : isRejoin ? `Você estava na sala <span class="invite-code">${inviteCode}</span>. Quer voltar?`
+      : `Você foi convidada pra sala <span class="invite-code">${inviteCode}</span> 🎉`;
+  $('btn-invite-join').textContent = isRejoin ? 'Voltar pra sala' : 'Entrar na sala';
+  $('btn-own-room').textContent = isRejoin ? 'Não, quero começar do zero' : 'Não fui convidada, quero criar minha própria sala';
   if (mode === 'join') $('in-code').focus();
   if (mode === 'invite' && !$('in-name').value) $('in-name').focus();
 }
@@ -117,7 +122,7 @@ $('btn-show-join').onclick = () => { if (getName()) homeMode('join'); };
 $('btn-back').onclick = () => homeMode('choose');
 $('btn-join').onclick = () => doJoin($('in-code').value.trim().toUpperCase());
 $('btn-invite-join').onclick = () => doJoin(inviteCode);
-$('btn-own-room').onclick = () => { history.replaceState(null, '', location.pathname); homeMode('choose'); };
+$('btn-own-room').onclick = () => { history.replaceState(null, '', location.pathname); sessionStorage.removeItem('ic-room'); homeMode('choose'); };
 
 // código: só letras, maiúsculas; com 4 letras + Enter já entra
 $('in-code').addEventListener('input', (e) => { e.target.value = e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4); });
@@ -141,6 +146,7 @@ function enterLobby() {
   $('result-host').classList.toggle('hidden', !net.isHost);
   $('result-guest').classList.toggle('hidden', net.isHost);
   history.replaceState(null, '', location.pathname);
+  if (!net.isHost) sessionStorage.setItem('ic-room', net.code); else sessionStorage.removeItem('ic-room');
   renderMode();
   renderLobby();
   show('lobby');
@@ -194,14 +200,35 @@ net.on('guestjoined', () => {
   toast('Uma amiga entrou na sala! 🎉');
 });
 net.on('guestleft', (p) => toast(`${p.name} saiu da sala.`));
+net.on('guestreplaced', ({ oldId, newId }) => {
+  if (state.wins[oldId]) { state.wins[newId] = state.wins[oldId]; delete state.wins[oldId]; }
+});
+let leaving = false;
+function leaveAndReload() { leaving = true; sessionStorage.removeItem('ic-room'); location.reload(); }
+window.addEventListener('beforeunload', (e) => {
+  if (net.code && !leaving) { e.preventDefault(); e.returnValue = ''; }   // "Tem certeza que quer sair?"
+});
+
 net.on('hostgone', () => {
+  if (net.full) return;
   toast('A dona da sala saiu. Voltando pro início…', 4000);
-  setTimeout(() => location.reload(), 3000);
+  setTimeout(leaveAndReload, 3000);
+});
+net.on('full', () => {
+  toast('Essa sala está cheia 😕 Voltando pro início…', 4000);
+  setTimeout(leaveAndReload, 3000);
 });
 net.on('neterror', (e) => console.warn('net', e));
 
 /* ---------- microfone ---------- */
 $('btn-mic').onclick = startMic;
+mic.onLost = () => {
+  toast('O microfone desconectou! Conecta de novo e clica em "Ativar microfone" 🎤', 6000);
+  $('btn-mic').textContent = 'Ativar microfone';
+  $('btn-mic').classList.remove('is-on');
+  $('btn-mic').disabled = false;
+  if (state.ready) { state.ready = false; net.setReady(false); renderLobby(); }
+};
 async function startMic() {
   try {
     await mic.start();
@@ -217,11 +244,17 @@ async function startMic() {
     return false;
   }
 }
+let meterRunning = false;
 function meterLoop() {
+  if (meterRunning) return;
+  meterRunning = true;
+  meterTick();
+}
+function meterTick() {
   const m = mic.read();
   $('mic-meter').style.width = (m.level * 100) + '%';
   $('game-meter').style.width = (m.level * 100) + '%';
-  requestAnimationFrame(meterLoop);
+  requestAnimationFrame(meterTick);
 }
 
 $('btn-ready').onclick = async () => {
@@ -244,8 +277,14 @@ function submitLink() {
   const raw = $('in-url').value.trim();
   if (!raw) return;
   const id = yt.extractVideoId(raw);
-  if (!id) { toast('Esse link não parece do YouTube 🤔'); return; }
+  if (!id) {
+    toast(/list=/.test(raw) ? 'Esse é o link de uma playlist. Abre a música que você quer e copia o link dela 🙂'
+      : /youtube\.com\/(@|c\/|channel\/|user\/)/i.test(raw) ? 'Esse é o link de um canal. Abre a música que você quer e copia o link dela 🙂'
+        : 'Esse link não parece de um vídeo do YouTube 🤔', 5000);
+    return;
+  }
   $('in-url').value = '';
+  if (isQueued(id)) { toast('Essa música já está aí 😉'); return; }
   const busy = !!(state.song || loadingId || state.queue.length);
   if (net.isHost) enqueue(id, myName());
   else net.broadcast({ type: 'enqueue', videoId: id });
@@ -253,14 +292,21 @@ function submitLink() {
 }
 
 // convidada mandou uma música: só a dona da sala coloca na fila
+const lastEnqueueFrom = Object.create(null);
 net.on('enqueue', (msg) => {
   if (!net.isHost || msg.from === net.myId) return;
+  const now = Date.now();
+  if (now - (lastEnqueueFrom[msg.from] || 0) < 1000) return;   // no máximo 1 por segundo de cada
+  lastEnqueueFrom[msg.from] = now;
   const id = yt.extractVideoId(String(msg.videoId || ''));
   const who = net.players.find((p) => p.id === msg.from);
   if (id && who) enqueue(id, who.name);
 });
 
+const isQueued = (id) => !!((state.song && state.song.videoId === id) || loadingId === id || state.queue.some((q) => q.videoId === id));
+
 function enqueue(id, by) {
+  if (isQueued(id)) return;
   if (state.queue.length >= 20) { toast('A fila tá cheia (20 músicas) 😅'); return; }
   const item = { videoId: id, by, title: 'Vídeo do YouTube' };
   state.queue.push(item);
@@ -370,14 +416,15 @@ function songCard(id, title, status, cls) {
 
 function broadcastSetup() {
   if (!net.isHost) return;
-  net.broadcast({ type: 'setup', song: state.song, mode: state.mode, queue: state.queue, wins: state.wins });
+  // { ...wins } = objeto comum (o PeerJS não sabe enviar o objeto "sem protótipo" usado aqui dentro)
+  net.broadcast({ type: 'setup', song: state.song, mode: state.mode, queue: state.queue, wins: { ...state.wins } });
 }
 
 /* ---------- música (convidada) ---------- */
 net.on('setup', async (msg) => {
   state.mode = msg.mode;
   state.queue = msg.queue || [];
-  state.wins = msg.wins || {};
+  state.wins = Object.assign(Object.create(null), msg.wins || {});
   renderMode();
   renderQueue();
   renderNight();
@@ -424,6 +471,12 @@ function renderMode() {
 $('btn-start').onclick = () => startRound();
 function startRound() {
   if (!net.isHost || !state.song) return;
+  if (state.game && !state.game.finished) return;            // clique duplo não reinicia a música
+  const notReady = net.players.filter((p) => !p.ready);
+  if (notReady.length) {
+    toast(`Esperando ${notReady.map((p) => p.name).join(', ')} clicar em "Estou pronta!" 🙂`, 4000);
+    return;
+  }
   const players = net.players.map((p) => ({ id: p.id, name: p.name }));
   net.broadcast({
     type: 'start',
@@ -440,8 +493,8 @@ function startRound() {
 net.on('start', async (msg) => {
   if (!state.song) return;
   state.round = msg.round;
-  state.finals = {};
-  state.live = {};
+  state.finals = Object.create(null);
+  state.live = Object.create(null);
   const myIndex = msg.players.findIndex((p) => p.id === net.myId);
   const lines = state.song.lines;
   state.game = {
@@ -451,7 +504,7 @@ net.on('start', async (msg) => {
     shots: cam.active ? planShots(lines, msg.who, myIndex) : null,
     myPhotos: [], peakPhoto: null, peak: 0, lastPeakShot: 0,
   };
-  state.photos = {};
+  state.photos = Object.create(null);
   renderPhotos();
 
   $('tap-overlay').classList.add('hidden');
@@ -701,9 +754,12 @@ function updateScores(active) {
   });
 }
 
+const inRound = (id) => !!(state.game && state.game.players.some((p) => p.id === id));
+const num = (x, max) => { const v = Math.round(Number(x)); return Number.isFinite(v) ? Math.max(0, Math.min(max, v)) : 0; };
+
 net.on('live', (msg) => {
-  if (!state.game || msg.round !== state.game.round) return;
-  state.live[msg.from] = msg.score;
+  if (!state.game || msg.round !== state.game.round || !inRound(msg.from)) return;
+  state.live[msg.from] = num(msg.score, 10000);
   updateScores(state.game.active ?? -1);
 });
 
@@ -758,8 +814,12 @@ function finishRound() {
 }
 
 net.on('final', (msg) => {
-  if (!state.game || msg.round !== state.game.round) return;
-  state.finals[msg.from] = msg.result;
+  if (!state.game || msg.round !== state.game.round || !inRound(msg.from) || state.finals[msg.from]) return;
+  const r = msg.result || {};
+  state.finals[msg.from] = {
+    total: num(r.total, 10000), presence: num(r.presence, 100), tune: num(r.tune, 100),
+    timbre: num(r.timbre, 100), rhythm: num(r.rhythm, 100),
+  };
   if (state.game.finished) renderResults();
 });
 
@@ -835,8 +895,12 @@ document.querySelectorAll('.react').forEach((b) => {
     net.broadcast({ type: 'react', emoji: b.dataset.e });
   };
 });
+const lastReactFrom = Object.create(null);
 net.on('react', (msg) => {
-  if (!state.game || !REACTIONS.includes(msg.emoji)) return;
+  if (!state.game || !REACTIONS.includes(msg.emoji) || !inRound(msg.from)) return;
+  const now = Date.now();
+  if (now - (lastReactFrom[msg.from] || 0) < 300 || $('reactions').childElementCount >= 30) return;
+  lastReactFrom[msg.from] = now;
   const idx = state.game.players.findIndex((p) => p.id === msg.from);
   const name = idx >= 0 ? state.game.players[idx].name : '';
   const el = document.createElement('div');
@@ -850,6 +914,13 @@ net.on('react', (msg) => {
 
 /* ---------- câmera e fotos da rodada ---------- */
 const CAM_MSG = 'O app tira umas fotos suas cantando e mostra no final. Nada fica salvo.';
+cam.onLost = () => {
+  toast('A câmera desconectou. Sem fotos por enquanto 📸', 5000);
+  $('cam-preview').classList.add('hidden');
+  $('btn-cam').textContent = '📸 Ligar câmera';
+  $('btn-cam').classList.remove('is-on');
+  $('cam-msg').textContent = CAM_MSG;
+};
 $('btn-cam').onclick = async () => {
   const btn = $('btn-cam'), prev = $('cam-preview'), msg = $('cam-msg');
   msg.style.color = '';
@@ -926,7 +997,7 @@ function sendPhotos(g) {
 
 const IMG_OK = /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/;
 net.on('photos', (msg) => {
-  if (!state.game || msg.round !== state.game.round || !Array.isArray(msg.photos)) return;
+  if (!state.game || msg.round !== state.game.round || !Array.isArray(msg.photos) || !inRound(msg.from)) return;
   state.photos[msg.from] = msg.photos
     .filter((p) => p && typeof p.img === 'string' && p.img.length < 200000 && IMG_OK.test(p.img))
     .slice(0, 6)
@@ -1016,7 +1087,11 @@ function renderResultButtons() {
 }
 
 $('btn-rematch').onclick = () => startRound();
-$('btn-other').onclick = () => net.broadcast({ type: 'lobby', autoStart: state.queue.length > 0 });
+$('btn-other').onclick = () => {
+  if (!net.isHost || !$('screen-result').classList.contains('active') || !state.game) return;
+  state.game = null;   // segundo clique não faz nada
+  net.broadcast({ type: 'lobby', autoStart: state.queue.length > 0 });
+};
 net.on('lobby', (msg) => {
   state.game = null;
   document.body.classList.remove('playing');
