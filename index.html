@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Irmãs Cantoras</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎤</text></svg>">
-  <link rel="stylesheet" href="css/glass.css?v=12">
+  <link rel="stylesheet" href="css/glass.css?v=13">
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
-  <script type="module" src="js/app.js?v=12"></script>
+  <script type="module" src="js/app.js?v=13"></script>
 </head>
 <body>
   <!-- Fundo animado (é o que dá vida ao vidro) -->
@@ -173,6 +173,7 @@
           <span id="sync-val">0,0s</span>
           <button id="btn-sync-plus" class="mini" title="Letra adiantada? Clique aqui">+</button>
         </div>
+        <button id="btn-hear" class="btn btn-small" title="Escutar sua própria voz no fone enquanto canta">🎧 Me ouvir</button>
         <button id="btn-mute" class="btn btn-small" title="Cantar sem a música (só no seu PC)">🔊 Música ligada</button>
         <button id="btn-end" class="btn btn-small">Encerrar</button>
       </div>
@@ -199,6 +200,11 @@
         <h2 id="result-title" class="title small">Resultado</h2>
         <div id="result-list" class="result-list"></div>
         <p id="result-wait" class="hint center"></p>
+        <div id="rec-box" class="rec-box hidden">
+          <button id="btn-rec-play" class="btn btn-primary">🎧 Ouvir minha gravação</button>
+          <a id="rec-download" class="link" download>💾 Guardar no PC</a>
+          <p id="rec-msg" class="hint center">Sua voz junto com a música, do começo ao fim. Só você escuta.</p>
+        </div>
         <p id="night-score" class="night-score hidden"></p>
         <div id="result-host" class="row center wrap">
           <button id="btn-rematch" class="btn">Revanche</button>

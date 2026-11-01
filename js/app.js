@@ -1,11 +1,11 @@
 // Irmãs Cantoras — fluxo do app (telas, lobby, jogo, resultado)
-import { net } from './net.js?v=12';
-import * as yt from './youtube.js?v=12';
-import { findLyrics } from './lyrics.js?v=12';
-import { assignParts, ALL } from './parts.js?v=12';
-import { mic } from './mic.js?v=12';
-import { Scorer } from './score.js?v=12';
-import { cam } from './cam.js?v=12';
+import { net } from './net.js?v=13';
+import * as yt from './youtube.js?v=13';
+import { findLyrics } from './lyrics.js?v=13';
+import { assignParts, ALL } from './parts.js?v=13';
+import { mic } from './mic.js?v=13';
+import { Scorer } from './score.js?v=13';
+import { cam } from './cam.js?v=13';
 
 const COLORS = ['#ff5fa2', '#4fb3ff', '#ffd166', '#7cf29a'];
 const ALL_COLOR = '#b388ff';
@@ -561,6 +561,8 @@ net.on('start', async (msg) => {
   };
   state.photos = Object.create(null);
   renderPhotos();
+  clearRecording();
+  if (myIndex >= 0) mic.monitor(hearMe);
 
   $('tap-overlay').classList.add('hidden');
   renderScoreboard();
@@ -590,6 +592,7 @@ function countdown(round) {
       ov.classList.add('hidden');
       g.started = true;
       yt.play();
+      if (g.myIndex >= 0 && mic.recStart()) g.recOffset = Math.max(0, (net.hostNow() - g.at) / 1000);
       // se o navegador bloquear o play automático, mostra um botão
       setTimeout(() => {
         if (state.game === g && !g.finished && !yt.isPlaying()) $('tap-overlay').classList.remove('hidden');
@@ -834,6 +837,85 @@ $('btn-mute').onclick = () => {
 yt.setMuted(musicOff);
 renderMute();
 
+/* ---------- me ouvir (voz no fone enquanto canta) ---------- */
+let hearMe = localStorage.getItem('ic-hear') === '1';
+function renderHear() {
+  $('btn-hear').textContent = hearMe ? '🎧 Me ouvindo' : '🎧 Me ouvir';
+  $('btn-hear').classList.toggle('is-on', hearMe);
+}
+$('btn-hear').onclick = () => {
+  hearMe = !hearMe;
+  localStorage.setItem('ic-hear', hearMe ? '1' : '0');
+  const g = state.game;
+  if (g && !g.finished && g.myIndex >= 0) mic.monitor(hearMe);
+  renderHear();
+  toast(hearMe ? 'Agora você escuta sua voz 🎧 Só use com fone de ouvido, senão dá microfonia!' : 'Não está mais escutando sua voz', 4500);
+};
+renderHear();
+
+/* ---------- gravação: ouvir a música inteira depois ---------- */
+const rec = { url: null, offset: 0, audio: null, iv: null };
+const mmss = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+
+function setRecording(blob, g) {
+  if (!blob || state.game !== g || blob.size < 2000) return;
+  clearRecording();
+  rec.url = URL.createObjectURL(blob);
+  rec.offset = g.recOffset || 0;
+  const ext = /mp4/.test(blob.type) ? 'm4a' : 'webm';
+  const name = (state.song && state.song.title || 'música').replace(/[\\/:*?"<>|]+/g, '').slice(0, 60);
+  $('rec-download').href = rec.url;
+  $('rec-download').download = `Minha gravação - ${name}.${ext}`;
+  $('rec-box').classList.remove('hidden');
+}
+
+function clearRecording() {
+  stopRecording();
+  if (rec.url) URL.revokeObjectURL(rec.url);
+  rec.url = null;
+  $('rec-box').classList.add('hidden');
+}
+
+function stopRecording() {
+  clearInterval(rec.iv);
+  if (!rec.audio) return;
+  rec.audio.pause();
+  rec.audio = null;
+  yt.pause();
+  yt.setMuted(musicOff);
+  document.body.classList.remove('replay');
+  $('btn-rec-play').textContent = '🎧 Ouvir minha gravação';
+}
+
+$('btn-rec-play').onclick = () => {
+  if (rec.audio) return stopRecording();
+  if (!rec.url || !state.song) return;
+  const a = new Audio(rec.url);
+  rec.audio = a;
+  a.onended = () => { if (rec.audio === a) stopRecording(); };
+  yt.setMuted(false);   // na gravação a música vem junto
+  yt.seek(rec.offset);
+  yt.play();
+  document.body.classList.add('replay');
+  $('btn-rec-play').textContent = '⏹ Parar';
+  const t0 = Date.now();
+  // a voz segue o vídeo: começa quando ele começa e é acertada se escorregar
+  rec.iv = setInterval(() => {
+    if (rec.audio !== a) return;
+    const st = yt.state();
+    const want = yt.time() - rec.offset;
+    if (st === 1) {
+      if (a.paused) { a.currentTime = Math.max(0, want); a.play().catch(() => {}); }
+      else if (Math.abs(a.currentTime - want) > 0.3) a.currentTime = Math.max(0, want);
+    } else if (st === 3 || st === 2) {
+      if (!a.paused && st === 3) a.pause();            // vídeo carregando: a voz espera
+      if (a.paused && Date.now() - t0 > 5000) a.play().catch(() => {});   // vídeo não quer tocar: vai só a voz
+    } else if (a.paused && (st === 0 || Date.now() - t0 > 5000)) a.play().catch(() => {});
+    $('btn-rec-play').textContent = `⏹ Parar (${mmss(a.currentTime)})`;
+  }, 250);
+};
+$('rec-download').onclick = (e) => { if (!rec.url) e.preventDefault(); };
+
 /* ---------- ajuste de sincronia da letra ---------- */
 function setShift(d) {
   const g = state.game; if (!g) return;
@@ -852,6 +934,8 @@ function finishRound() {
   if (!g || g.finished) return;
   g.finished = true;
   yt.pause();
+  mic.monitor(false);
+  if (g.recOffset != null) mic.recStop().then((blob) => setRecording(blob, g));
   document.body.classList.remove('playing');
   $('countdown').classList.add('hidden');
   $('tap-overlay').classList.add('hidden');
@@ -1148,6 +1232,7 @@ $('btn-other').onclick = () => {
   net.broadcast({ type: 'lobby', autoStart: state.queue.length > 0 });
 };
 net.on('lobby', (msg) => {
+  clearRecording();
   state.game = null;
   document.body.classList.remove('playing');
   yt.pause();

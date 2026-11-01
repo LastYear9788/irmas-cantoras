@@ -1,6 +1,8 @@
 // Microfone: volume e altura (pitch) da voz, direto no navegador.
 
-let ctx = null, analyser = null, buf = null, stream = null;
+let ctx = null, analyser = null, buf = null, stream = null, src = null;
+let monitorGain = null;   // "me ouvir": voz indo direto pro fone
+let recorder = null;
 let noiseFloor = 0.01;
 let last = null, lastAt = 0;
 let lastClarity = 0;
@@ -21,7 +23,7 @@ export const mic = {
         : 'O microfone foi bloqueado. Clica no cadeado ao lado do endereço do site e permite o microfone.');
     }
     ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const src = ctx.createMediaStreamSource(stream);
+    src = ctx.createMediaStreamSource(stream);
     analyser = ctx.createAnalyser();
     analyser.fftSize = 2048;
     src.connect(analyser);
@@ -32,9 +34,54 @@ export const mic = {
     stream.getAudioTracks().forEach((t) => t.addEventListener('ended', () => {
       mic.active = false;
       last = null;
+      monitorGain = null;
       try { ctx.close(); } catch (e) { /* ok */ }
       if (mic.onLost) mic.onLost();
     }));
+  },
+
+  /** Liga/desliga ouvir a própria voz no fone (só faz sentido com fone de ouvido). */
+  monitor(on) {
+    if (!mic.active) return;
+    if (on && !monitorGain) {
+      if (ctx.state === 'suspended') ctx.resume();
+      monitorGain = ctx.createGain();
+      monitorGain.gain.value = 1;
+      src.connect(monitorGain);
+      monitorGain.connect(ctx.destination);
+    } else if (!on && monitorGain) {
+      try { src.disconnect(monitorGain); monitorGain.disconnect(); } catch (e) { /* ok */ }
+      monitorGain = null;
+    }
+  },
+
+  /** Começa a gravar a voz (pra ouvir no final). */
+  recStart() {
+    mic.recCancel();
+    if (!mic.active || typeof MediaRecorder === 'undefined') return false;
+    try {
+      const type = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find((t) => MediaRecorder.isTypeSupported(t));
+      recorder = new MediaRecorder(stream, type ? { mimeType: type, audioBitsPerSecond: 96000 } : undefined);
+      const chunks = recorder.chunks = [];
+      recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+      recorder.start(1000);
+      return true;
+    } catch (e) { recorder = null; return false; }
+  },
+
+  /** Para de gravar e devolve o áudio (Blob) ou null. */
+  recStop() {
+    const r = recorder; recorder = null;
+    if (!r || r.state === 'inactive') return Promise.resolve(null);
+    return new Promise((resolve) => {
+      r.onstop = () => resolve(r.chunks.length ? new Blob(r.chunks, { type: r.mimeType || 'audio/webm' }) : null);
+      try { r.stop(); } catch (e) { resolve(null); }
+    });
+  },
+
+  recCancel() {
+    if (recorder && recorder.state !== 'inactive') { recorder.ondataavailable = null; try { recorder.stop(); } catch (e) { /* ok */ } }
+    recorder = null;
   },
 
   /** Lê o microfone agora. { rms, level (0-1 pra barra), pitch (Hz ou 0), voiced } */

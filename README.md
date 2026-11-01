@@ -19,6 +19,8 @@ Pronto. O app acha a letra sozinho, divide quem canta o quê e dá a nota no fin
 
 ### Extras
 - **Câmera (opcional):** ligue no lobby e o app tira umas fotos de você cantando pra mostrar no final. Nada fica salvo; cada uma pode apagar as próprias fotos.
+- **🎧 Me ouvir:** durante a música, clique em "Me ouvir" pra escutar sua própria voz no fone (só com fone de ouvido, senão dá microfonia).
+- **Sua gravação:** no final da rodada, clique em "Ouvir minha gravação" pra escutar sua voz junto com a música do começo ao fim. Dá pra guardar no PC também. Só você escuta.
 - **Reações:** 👏😂🔥😍😱 durante a música.
 - **Placar da noite:** conta as vitórias enquanto a sala estiver aberta.
 
