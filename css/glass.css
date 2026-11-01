@@ -245,3 +245,23 @@ main { position: relative; z-index: 2; min-height: 100vh; }
   .title { font-size: 32px; }
   .room-code { font-size: 30px; }
 }
+
+/* ---------- tela inicial: escolhas grandes ---------- */
+.choices { display: flex; flex-direction: column; gap: 12px; text-align: left; }
+.step { font-size: 13px; color: var(--muted); padding-left: 6px; margin-top: 6px; }
+.choice {
+  display: flex; align-items: center; gap: 16px; width: 100%; padding: 16px 18px;
+  border-radius: 22px; cursor: pointer; text-align: left;
+  transition: transform 0.35s var(--spring), background 0.2s, border-color 0.2s;
+}
+.choice:hover { transform: scale(1.025); border-color: rgba(255,255,255,0.45); }
+.choice:active { transform: scale(0.97); }
+.choice:disabled { opacity: 0.5; cursor: wait; transform: none; }
+.choice-icon { font-size: 30px; flex: none; width: 44px; text-align: center; }
+.choice b { display: block; font-size: 17px; }
+.choice small { display: block; font-size: 13px; color: var(--muted); margin-top: 2px; }
+.link { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 13px; text-decoration: underline; padding: 4px; align-self: center; }
+.link:hover { color: var(--text); }
+.invite-code { font-weight: 800; letter-spacing: 0.15em; color: #fff; }
+.shake { animation: shake 0.4s; }
+@keyframes shake { 20%, 60% { transform: translateX(-6px); } 40%, 80% { transform: translateX(6px); } }

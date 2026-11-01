@@ -44,23 +44,57 @@ function toast(text, ms = 3500) {
    INÍCIO
    ============================================================ */
 const params = new URLSearchParams(location.search);
+const inviteCode = (params.get('sala') || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4);
 $('in-name').value = localStorage.getItem('ic-name') || '';
-if (params.get('sala')) {
-  $('in-code').value = params.get('sala').toUpperCase().slice(0, 4);
-  $('home-msg').style.color = '#cfe6ff';
-  $('home-msg').textContent = `Você foi convidada pra sala ${$('in-code').value}! Coloca seu nome e clica em Entrar.`;
-  $('btn-join').classList.add('btn-primary');      // quem foi convidada só precisa clicar em Entrar
-  $('btn-create').classList.remove('btn-primary');
+
+/** mostra só um "caminho" por vez: escolher / digitar código / convite */
+function homeMode(mode) {
+  $('home-choose').classList.toggle('hidden', mode !== 'choose');
+  $('home-join').classList.toggle('hidden', mode !== 'join');
+  $('home-invite').classList.toggle('hidden', mode !== 'invite');
+  $('home-msg').textContent = '';
+  $('home-sub').innerHTML = mode === 'invite'
+    ? `Você foi convidada pra sala <span class="invite-code">${inviteCode}</span> 🎉`
+    : 'Duelo de karaokê. Quem canta melhor?';
+  if (mode === 'join') $('in-code').focus();
+  if (mode === 'invite' && !$('in-name').value) $('in-name').focus();
 }
+homeMode(inviteCode.length === 4 ? 'invite' : 'choose');
 
 function getName() {
   const n = $('in-name').value.trim();
-  if (!n) { $('home-msg').textContent = 'Coloca seu nome primeiro 😉'; $('in-name').focus(); return null; }
+  if (!n) {
+    $('home-msg').textContent = 'Primeiro coloca seu nome aqui em cima 👆';
+    const el = $('in-name');
+    el.classList.remove('shake'); void el.offsetWidth; el.classList.add('shake');
+    el.focus();
+    return null;
+  }
   localStorage.setItem('ic-name', n);
   return n;
 }
 
-function busyHome(b) { $('btn-create').disabled = b; $('btn-join').disabled = b; }
+function busyHome(b) {
+  ['btn-create', 'btn-show-join', 'btn-join', 'btn-invite-join'].forEach((id) => { $(id).disabled = b; });
+}
+
+async function doJoin(code) {
+  const name = getName(); if (!name) return;
+  if (code.length !== 4) {
+    $('home-msg').textContent = 'O código tem 4 letras. Confere o que sua amiga mandou!';
+    $('in-code').focus();
+    return;
+  }
+  busyHome(true);
+  $('home-msg').textContent = 'Entrando na sala…';
+  try {
+    await net.joinRoom(code, name);
+    enterLobby();
+  } catch (e) {
+    $('home-msg').textContent = e.message || e;
+  }
+  busyHome(false);
+}
 
 $('btn-create').onclick = async () => {
   const name = getName(); if (!name) return;
@@ -74,23 +108,20 @@ $('btn-create').onclick = async () => {
   }
   busyHome(false);
 };
+$('btn-show-join').onclick = () => { if (getName()) homeMode('join'); };
+$('btn-back').onclick = () => homeMode('choose');
+$('btn-join').onclick = () => doJoin($('in-code').value.trim().toUpperCase());
+$('btn-invite-join').onclick = () => doJoin(inviteCode);
+$('btn-own-room').onclick = () => { history.replaceState(null, '', location.pathname); homeMode('choose'); };
 
-$('btn-join').onclick = async () => {
-  const name = getName(); if (!name) return;
-  const code = $('in-code').value.trim().toUpperCase();
-  if (code.length !== 4) { $('home-msg').textContent = 'O código da sala tem 4 letras.'; $('in-code').focus(); return; }
-  busyHome(true);
-  $('home-msg').textContent = 'Entrando…';
-  try {
-    await net.joinRoom(code, name);
-    enterLobby();
-  } catch (e) {
-    $('home-msg').textContent = e.message || e;
-  }
-  busyHome(false);
-};
+// código: só letras, maiúsculas; com 4 letras + Enter já entra
+$('in-code').addEventListener('input', (e) => { e.target.value = e.target.value.toUpperCase().replace(/[^A-Z]/g, ''); });
 $('in-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('btn-join').click(); });
-$('in-name').addEventListener('keydown', (e) => { if (e.key === 'Enter') ($('in-code').value ? $('btn-join') : $('btn-create')).click(); });
+$('in-name').addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  if (!$('home-invite').classList.contains('hidden')) $('btn-invite-join').click();
+  else if (!$('home-join').classList.contains('hidden')) $('in-code').focus();
+});
 
 /* ============================================================
    LOBBY

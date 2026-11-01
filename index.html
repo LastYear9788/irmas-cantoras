@@ -25,21 +25,40 @@
       <div class="card glass hero">
         <div class="logo">🎤</div>
         <h1 class="title">Irmãs Cantoras</h1>
-        <p class="subtitle">Duelo de karaokê. Quem canta melhor?</p>
+        <p id="home-sub" class="subtitle">Duelo de karaokê. Quem canta melhor?</p>
 
         <label class="field">
-          <span>Seu nome</span>
+          <span>1. Qual o seu nome?</span>
           <input id="in-name" class="glass-input" maxlength="16" placeholder="Ex: Ana" autocomplete="off">
         </label>
 
-        <button id="btn-create" class="btn btn-primary">Criar sala</button>
-
-        <div class="divider"><span>ou entre numa sala</span></div>
-
-        <div class="row">
-          <input id="in-code" class="glass-input code-input" maxlength="4" placeholder="CÓDIGO" autocomplete="off">
-          <button id="btn-join" class="btn">Entrar</button>
+        <!-- Caminho normal: escolher entre criar ou entrar -->
+        <div id="home-choose" class="choices">
+          <span class="step">2. O que você quer fazer?</span>
+          <button id="btn-create" class="choice glass">
+            <span class="choice-icon">✨</span>
+            <span><b>Criar uma sala</b><small>Eu escolho a música e chamo minha amiga</small></span>
+          </button>
+          <button id="btn-show-join" class="choice glass">
+            <span class="choice-icon">🚪</span>
+            <span><b>Entrar na sala de uma amiga</b><small>Ela me passou um código de 4 letras</small></span>
+          </button>
         </div>
+
+        <!-- Entrar com código -->
+        <div id="home-join" class="choices hidden">
+          <span class="step">2. Digite o código que sua amiga mandou</span>
+          <input id="in-code" class="glass-input code-input" maxlength="4" placeholder="ABCD" autocomplete="off">
+          <button id="btn-join" class="btn btn-primary btn-big">Entrar na sala</button>
+          <button id="btn-back" class="link">← Voltar</button>
+        </div>
+
+        <!-- Veio pelo link de convite: só um botão -->
+        <div id="home-invite" class="choices hidden">
+          <button id="btn-invite-join" class="btn btn-primary btn-big">Entrar na sala</button>
+          <button id="btn-own-room" class="link">Não fui convidada, quero criar minha própria sala</button>
+        </div>
+
         <p id="home-msg" class="msg"></p>
       </div>
       <p class="footnote">Use Chrome ou Edge · Use fone de ouvido 🎧</p>
