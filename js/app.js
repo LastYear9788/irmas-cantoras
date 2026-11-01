@@ -1,10 +1,10 @@
 // Irmãs Cantoras — fluxo do app (telas, lobby, jogo, resultado)
-import { net } from './net.js?v=7';
-import * as yt from './youtube.js?v=7';
-import { findLyrics } from './lyrics.js?v=7';
-import { assignParts, ALL } from './parts.js?v=7';
-import { mic } from './mic.js?v=7';
-import { Scorer } from './score.js?v=7';
+import { net } from './net.js?v=8';
+import * as yt from './youtube.js?v=8';
+import { findLyrics } from './lyrics.js?v=8';
+import { assignParts, ALL } from './parts.js?v=8';
+import { mic } from './mic.js?v=8';
+import { Scorer } from './score.js?v=8';
 
 const COLORS = ['#ff5fa2', '#4fb3ff', '#ffd166', '#7cf29a'];
 const ALL_COLOR = '#b388ff';
@@ -532,8 +532,8 @@ function updateBanner(active, k, lt) {
   const countdownTo = (m) => {
     w = g.who[m.j];
     mode = 'soon';
-    main = m.secs <= 1 ? '🎤 VAI!' : `⏳ SUA VEZ EM ${m.secs}`;
-    sub = m.secs <= 1 ? 'Agora!' : 'Prepara!';
+    main = `⏳ SUA VEZ EM ${Math.max(1, m.secs)}`;
+    sub = 'Prepara!';
   };
 
   if (active >= 0 && isMine(g.who[active])) {

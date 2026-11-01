@@ -275,15 +275,14 @@ main { position: relative; z-index: 2; min-height: 100vh; }
   display: flex; flex-direction: column; align-items: center; gap: 2px;
   padding: 14px 40px; border-radius: 999px; min-width: 320px; text-align: center;
   border-color: color-mix(in srgb, var(--c) 60%, transparent);
-  transition: border-color 0.3s, box-shadow 0.3s, transform 0.4s var(--spring);
+  transition: border-color 0.3s, box-shadow 0.3s;
 }
 .turn-main { font-size: clamp(26px, 3.6vw, 40px); font-weight: 800; letter-spacing: 0.02em; color: var(--c); text-shadow: 0 2px 18px color-mix(in srgb, var(--c) 60%, transparent); }
 .turn-sub { font-size: 15px; font-weight: 600; color: rgba(255,255,255,0.8); min-height: 1.2em; }
-.turn-banner.mine { transform: scale(1.06); box-shadow: 0 0 50px color-mix(in srgb, var(--c) 55%, transparent), inset 0 1px 0 rgba(255,255,255,0.5); animation: turnpulse 1.4s ease-in-out infinite; }
-.turn-banner.soon { animation: turnpulse 0.7s ease-in-out infinite; box-shadow: 0 0 30px color-mix(in srgb, var(--c) 40%, transparent); }
+.turn-banner.mine { box-shadow: 0 0 50px color-mix(in srgb, var(--c) 55%, transparent), inset 0 1px 0 rgba(255,255,255,0.5); }
+.turn-banner.soon { box-shadow: 0 0 40px color-mix(in srgb, var(--c) 45%, transparent), inset 0 1px 0 rgba(255,255,255,0.5); }
 .turn-banner.other { opacity: 0.9; }
 .turn-banner.idle .turn-main { color: rgba(255,255,255,0.85); text-shadow: none; }
-@keyframes turnpulse { 50% { box-shadow: 0 0 70px color-mix(in srgb, var(--c) 75%, transparent), inset 0 1px 0 rgba(255,255,255,0.5); } }
 
 .lyrics-card { transition: box-shadow 0.4s, border-color 0.4s, opacity 0.4s; }
 .lyrics-card.turn-mine { border-color: color-mix(in srgb, var(--c) 70%, transparent); box-shadow: 0 0 60px color-mix(in srgb, var(--c) 35%, transparent), inset 0 1px 0 rgba(255,255,255,0.45), 0 20px 50px rgba(0,0,0,0.35); }
@@ -304,10 +303,7 @@ main { position: relative; z-index: 2; min-height: 100vh; }
 .tip-word:hover::after { opacity: 1; transform: translate(-50%, 0); }
 
 /* ---------- aviso de troca de vez ---------- */
-.turn-banner.soon { transform: scale(1.1); animation: turnpulse 0.6s ease-in-out infinite; }
-.turn-banner.soon .turn-main { font-size: clamp(30px, 4.4vw, 48px); }
-.lyrics-card.turn-soon { border-color: color-mix(in srgb, var(--sc) 80%, transparent); animation: cardpulse 0.6s ease-in-out infinite; }
-@keyframes cardpulse { 50% { box-shadow: 0 0 70px color-mix(in srgb, var(--sc) 45%, transparent), inset 0 1px 0 rgba(255,255,255,0.45); } }
+.lyrics-card.turn-soon { border-color: color-mix(in srgb, var(--sc) 80%, transparent); box-shadow: 0 0 50px color-mix(in srgb, var(--sc) 30%, transparent), inset 0 1px 0 rgba(255,255,255,0.45); }
 .ly-next.handoff { color: color-mix(in srgb, var(--nc) 75%, white); opacity: 0.9; }
 .ly-next.handoff::before {
   content: attr(data-who); display: block; margin-bottom: 2px;
