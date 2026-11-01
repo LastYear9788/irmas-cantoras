@@ -94,7 +94,10 @@ export async function prepare(videoId) {
   });
 }
 
-export function play() { if (player) { player.unMute(); player.setVolume(100); player.playVideo(); } }
+let muted = false;
+export function play() { if (player) { if (muted) player.mute(); else { player.unMute(); player.setVolume(100); } player.playVideo(); } }
+/** liga/desliga o som da música (só neste PC) */
+export function setMuted(m) { muted = m; if (player) { if (m) player.mute(); else { player.unMute(); player.setVolume(100); } } }
 export function pause() { if (player) player.pauseVideo(); }
 export function seek(t) { if (player) player.seekTo(Math.max(0, t), true); }
 export function time() { return player ? player.getCurrentTime() || 0 : 0; }

@@ -496,6 +496,22 @@ net.on('live', (msg) => {
   updateScores(state.game.active ?? -1);
 });
 
+/* ---------- som da música (cada uma escolhe no seu PC) ---------- */
+let musicOff = localStorage.getItem('ic-music-off') === '1';
+function renderMute() {
+  $('btn-mute').textContent = musicOff ? '🔇 Música desligada' : '🔊 Música ligada';
+  $('btn-mute').classList.toggle('is-on', musicOff);
+}
+$('btn-mute').onclick = () => {
+  musicOff = !musicOff;
+  localStorage.setItem('ic-music-off', musicOff ? '1' : '0');
+  yt.setMuted(musicOff);
+  renderMute();
+  toast(musicOff ? 'Música desligada. A letra continua passando, é só cantar! 🎤' : 'Música ligada 🎶');
+};
+yt.setMuted(musicOff);
+renderMute();
+
 /* ---------- ajuste de sincronia da letra ---------- */
 function setShift(d) {
   const g = state.game; if (!g) return;

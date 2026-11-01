@@ -5,10 +5,11 @@ const API = 'https://lrclib.net/api/search';
 
 // palavras que aparecem em título de vídeo e atrapalham a busca
 const JUNK = [
+  'karaoke version', 'versão karaokê', 'versao karaoke', 'versão instrumental', 'karaokê version',
   'official music video', 'official video', 'official audio', 'official lyric video', 'official visualizer',
   'music video', 'lyric video', 'lyrics video', 'lyrics', 'lyric', 'letra', 'legendado', 'tradução', 'traducao',
   'clipe oficial', 'videoclipe oficial', 'videoclipe', 'clipe', 'vídeo oficial', 'video oficial', 'áudio oficial', 'audio oficial',
-  'visualizer', 'audio', 'áudio', 'official', 'oficial', 'remastered', 'remaster', 'hd', 'hq', '4k', 'mv', 'm/v', 'karaoke', 'karaokê',
+  'visualizer', 'audio', 'áudio', 'official', 'oficial', 'remastered', 'remaster', 'hd', 'hq', '4k', 'mv', 'm/v', 'karaoke', 'karaokê', 'instrumental', 'playback', 'sem voz',
 ];
 
 function stripJunk(s) {
