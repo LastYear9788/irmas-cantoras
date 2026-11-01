@@ -53,6 +53,9 @@ export function buildQueries(title, author) {
     add({ q: `${art} ${stripFeat(clean)}` });
   }
   add({ q: stripFeat(clean) });
+  // sem "ao vivo"/"live" (a busca às vezes não acha com isso)
+  const noVer = stripFeat(clean).replace(/(^|\s)(ao vivo|live|acústico|acustico)(?=\s|$)/gi, ' ').replace(/\s+/g, ' ').trim();
+  if (noVer) add({ q: noVer });
   add({ q: clean });
   return qs;
 }
@@ -69,9 +72,11 @@ const normName = (x) => (x || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ
   .replace(/\(.*?\)|\[.*?\]/g, ' ').replace(/[^a-z0-9぀-鿿 ]/g, ' ').replace(/\s+/g, ' ').trim();
 
 /** o nome da música encontrada tem que aparecer no título do vídeo (e o artista também, se der) */
+let relaxed = false;   // 2ª tentativa: o título do vídeo não tem o nome do artista (ex: canal de TV)
 function sameSong(foundTrack, foundArtist, haystack) {
   const t = normName(foundTrack);
   if (!t || !(' ' + haystack + ' ').includes(' ' + t + ' ')) return false;
+  if (relaxed) return t.length >= 4;   // só o nome da música (e não pode ser curtinho demais)
   const artists = normName(foundArtist).split(/ (?:feat|ft|and|e|x) | /).filter((w) => w.length > 2);
   return !artists.length || artists.some((w) => haystack.includes(w));
 }
@@ -200,14 +205,30 @@ async function neteaseFind(text, videoDuration, wantsVersion, hay) {
 export async function findLyrics(title, author, videoDuration) {
   const queries = buildQueries(title, author);
   const hay = normName(title + ' ' + cleanAuthor(author)) + ' ' + plain(title);
-  let best = null;
-  let down = 0, tried = 1;
+  const st = { best: null, down: 0, tried: 0 };
 
+  // 1ª passada: exige que o artista apareça no título/canal. 2ª: só o nome da música.
+  for (const rel of [false, true]) {
+    relaxed = rel;
+    try {
+      const r = await searchAll(queries, hay, title, videoDuration, st);
+      if (r) return r;
+    } finally { relaxed = false; }
+    if (st.best) return st.best;
+  }
+
+  if (st.down === st.tried) throw new Error('Os sites de letras estão fora do ar agora 😢 Tenta de novo daqui a pouco.');
+  throw new Error('Não achei a letra dessa música 😕 Tenta outro link (de preferência o clipe oficial ou o áudio oficial).');
+}
+
+/** Procura em todas as fontes. Devolve logo se achar uma bem parecida; senão guarda a melhor em st.best */
+async function searchAll(queries, hay, title, videoDuration, st) {
   // 1) LRCLIB
+  st.tried++;
   for (const q of queries) {
     let results;
     try { results = await search(q); }
-    catch (e) { if (e.server || e instanceof TypeError) { down++; break; } continue; }
+    catch (e) { if (e.server || e instanceof TypeError) { st.down++; break; } continue; }
 
     for (const r of results || []) {
       if (!r.syncedLyrics || r.instrumental) continue;
@@ -215,30 +236,25 @@ export async function findLyrics(title, author, videoDuration) {
       const lines = parseLRC(r.syncedLyrics);
       if (lines.length < 4) continue;
       const diff = videoDuration ? Math.abs((r.duration || 0) - videoDuration) : 0;
-      if (!best || diff < best.diff) best = { lines, diff, artist: r.artistName, track: r.trackName };
+      if (!st.best || diff < st.best.diff) st.best = { lines, diff, artist: r.artistName, track: r.trackName };
     }
-    if (best && best.diff <= 4) return best;   // achou uma bem parecida
+    if (st.best && st.best.diff <= 4) return st.best;   // achou uma bem parecida
   }
 
-  // 2) e 3) Deezer e NetEase (se o LRCLIB caiu ou não achou nada bom)
+  // 2) e 3) Deezer e NetEase
   const wantsVersion = /remix|cover|live|ao vivo|acústico|acustico/i.test(title);
-  const texts = [...new Set(queries.map((q) => q.q || `${q.artist_name} ${q.track_name}`))].slice(0, 3);
+  const texts = [...new Set(queries.map((q) => q.q || `${q.artist_name} ${q.track_name}`))].slice(0, 4);
   for (const find of [deezerFind, neteaseFind]) {
     for (const text of texts) {
-      tried++;
+      st.tried++;
       try {
         const r = await find(text, videoDuration, wantsVersion, hay);
-        if (r && (!best || r.diff < best.diff)) best = r;
-        if (best && best.diff <= 4) return best;
-      } catch (e) { down++; }
+        if (r && (!st.best || r.diff < st.best.diff)) st.best = r;
+        if (st.best && st.best.diff <= 4) return st.best;
+      } catch (e) { st.down++; }
     }
   }
-
-  if (!best) {
-    if (down === tried) throw new Error('Os sites de letras estão fora do ar agora 😢 Tenta de novo daqui a pouco.');
-    throw new Error('Não achei a letra dessa música 😕 Tenta outro link (de preferência o clipe oficial ou o áudio oficial).');
-  }
-  return best;
+  return null;
 }
 
 /** "[01:23.45] texto" -> [{ t, end, text }] */
