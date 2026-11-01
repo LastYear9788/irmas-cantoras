@@ -5,9 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Irmãs Cantoras</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎤</text></svg>">
-  <link rel="stylesheet" href="css/glass.css?v=13">
+  <link rel="stylesheet" href="css/glass.css?v=14">
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
-  <script type="module" src="js/app.js?v=13"></script>
+  <script>document.documentElement.classList.toggle('theme-new', localStorage.getItem('ic-theme') !== 'classic');</script>
+  <script type="module" src="js/app.js?v=14"></script>
+  <script type="module" src="js/theme.js?v=14"></script>
 </head>
 <body>
   <!-- Fundo animado (é o que dá vida ao vidro) -->
@@ -15,6 +17,8 @@
     <span class="blob b1"></span><span class="blob b2"></span>
     <span class="blob b3"></span><span class="blob b4"></span>
   </div>
+  <div id="bubbles" class="bubbles" aria-hidden="true"></div>
+  <div class="frost" aria-hidden="true"></div>
 
   <!-- Vídeo do YouTube (fica atrás de tudo durante o jogo) -->
   <div id="video-wrap"><div id="yt"></div></div>
@@ -22,7 +26,7 @@
   <main>
     <!-- ============ INÍCIO ============ -->
     <section id="screen-home" class="screen active">
-      <div class="card glass hero">
+      <div class="card glass hero liquid">
         <div class="logo">🎤</div>
         <h1 class="title">Irmãs Cantoras</h1>
         <p id="home-sub" class="subtitle">Duelo de karaokê. Quem canta melhor?</p>
@@ -67,7 +71,7 @@
     <!-- ============ LOBBY ============ -->
     <section id="screen-lobby" class="screen">
       <div class="lobby-grid">
-        <div class="card glass">
+        <div class="card glass liquid">
           <div class="room-head">
             <div>
               <div class="label">Sala</div>
@@ -96,7 +100,7 @@
           <button id="btn-ready" class="btn btn-primary">Estou pronta!</button>
         </div>
 
-        <div class="card glass">
+        <div class="card glass liquid">
           <div class="label">Música</div>
           <div id="host-song-controls">
             <div class="row">
@@ -195,7 +199,7 @@
 
     <!-- ============ RESULTADO ============ -->
     <section id="screen-result" class="screen">
-      <div class="card glass result-card">
+      <div class="card glass result-card liquid">
         <div id="result-crown" class="crown">👑</div>
         <h2 id="result-title" class="title small">Resultado</h2>
         <div id="result-list" class="result-list"></div>
@@ -219,6 +223,7 @@
     </section>
   </main>
 
+  <button id="btn-theme" class="btn btn-small theme-btn">🎨 Visual: Novo</button>
   <div id="toast" class="toast glass"></div>
 </body>
 </html>

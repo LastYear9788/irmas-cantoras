@@ -1,7 +1,13 @@
 // Microfone: volume e altura (pitch) da voz, direto no navegador.
 
 let ctx = null, analyser = null, buf = null, stream = null, src = null;
-let monitorGain = null;   // "me ouvir": voz indo direto pro fone
+let mon = null, monToken = 0;   // "me ouvir": voz indo direto pro fone
+function stopMonitor() {
+  if (!mon) return;
+  mon.s.getTracks().forEach((t) => t.stop());
+  try { mon.c.close(); } catch (e) { /* ok */ }
+  mon = null;
+}
 let recorder = null;
 let noiseFloor = 0.01;
 let last = null, lastAt = 0;
@@ -34,25 +40,30 @@ export const mic = {
     stream.getAudioTracks().forEach((t) => t.addEventListener('ended', () => {
       mic.active = false;
       last = null;
-      monitorGain = null;
+      monToken++; stopMonitor();
       try { ctx.close(); } catch (e) { /* ok */ }
       if (mic.onLost) mic.onLost();
     }));
   },
 
-  /** Liga/desliga ouvir a própria voz no fone (só faz sentido com fone de ouvido). */
+  /**
+   * Liga/desliga ouvir a própria voz no fone (só faz sentido com fone de ouvido).
+   * Usa um caminho separado: microfone "cru" (sem o filtro de eco, que brigava com a voz
+   * tocando no fone e deixava tudo travado) e um áudio próprio de baixa latência.
+   */
   monitor(on) {
-    if (!mic.active) return;
-    if (on && !monitorGain) {
-      if (ctx.state === 'suspended') ctx.resume();
-      monitorGain = ctx.createGain();
-      monitorGain.gain.value = 1;
-      src.connect(monitorGain);
-      monitorGain.connect(ctx.destination);
-    } else if (!on && monitorGain) {
-      try { src.disconnect(monitorGain); monitorGain.disconnect(); } catch (e) { /* ok */ }
-      monitorGain = null;
-    }
+    const token = ++monToken;
+    if (!on || !mic.active) { stopMonitor(); return; }
+    if (mon) return;
+    navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, latency: 0 },
+    }).then((s) => {
+      if (token !== monToken || mon) { s.getTracks().forEach((t) => t.stop()); return; }
+      const c = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 0 });
+      c.createMediaStreamSource(s).connect(c.destination);
+      if (c.state === 'suspended') c.resume();
+      mon = { s, c };
+    }).catch(() => { /* sem permissão: só não toca */ });
   },
 
   /** Começa a gravar a voz (pra ouvir no final). */

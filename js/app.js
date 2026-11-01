@@ -1,11 +1,11 @@
 // Irmãs Cantoras — fluxo do app (telas, lobby, jogo, resultado)
-import { net } from './net.js?v=13';
-import * as yt from './youtube.js?v=13';
-import { findLyrics } from './lyrics.js?v=13';
-import { assignParts, ALL } from './parts.js?v=13';
-import { mic } from './mic.js?v=13';
-import { Scorer } from './score.js?v=13';
-import { cam } from './cam.js?v=13';
+import { net } from './net.js?v=14';
+import * as yt from './youtube.js?v=14';
+import { findLyrics } from './lyrics.js?v=14';
+import { assignParts, ALL } from './parts.js?v=14';
+import { mic } from './mic.js?v=14';
+import { Scorer } from './score.js?v=14';
+import { cam } from './cam.js?v=14';
 
 const COLORS = ['#ff5fa2', '#4fb3ff', '#ffd166', '#7cf29a'];
 const ALL_COLOR = '#b388ff';
