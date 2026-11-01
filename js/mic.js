@@ -3,6 +3,7 @@
 let ctx = null, analyser = null, buf = null, stream = null;
 let noiseFloor = 0.01;
 let last = null, lastAt = 0;
+let lastClarity = 0;
 
 export const mic = {
   active: false,
@@ -41,7 +42,7 @@ export const mic = {
     const rms = Math.sqrt(sum / buf.length);
     const loud = rms > Math.max(0.012, noiseFloor * 2.5);
     const pitch = loud ? detectPitch(buf, ctx.sampleRate) : 0;
-    last = { rms, level: Math.min(1, rms * 8), pitch, voiced: loud && pitch > 0 };
+    last = { rms, level: Math.min(1, rms * 8), pitch, voiced: loud && pitch > 0, clarity: pitch > 0 ? lastClarity : 0 };
     return last;
   },
 };
@@ -86,6 +87,7 @@ function detectPitch(b, rate) {
     }
   }
   if (bestLag < 0) return 0;
+  lastClarity = best;
   // interpolação parabólica pra precisão
   const a = corr[bestLag - 1], c = corr[bestLag + 1];
   const shift = (a - c) / (2 * (a - 2 * best + c)) || 0;

@@ -118,6 +118,18 @@
           <button id="btn-start" class="btn btn-primary btn-big" disabled>Começar!</button>
           <p id="start-hint" class="hint center"></p>
         </div>
+
+        <div class="card glass score-explain">
+          <div class="label">🏆 Como funciona a nota</div>
+          <p class="hint">Enquanto você canta, o app escuta sua voz pelo microfone <b>60 vezes por segundo</b>, só nas <b>suas</b> partes. No final, cada uma ganha de <b>0 a 10.000 pontos</b>:</p>
+          <div class="crit-grid">
+            <div class="crit"><span class="crit-icon">💨</span><div><b>Fôlego <small>30%</small></b><p>Cantar a linha inteira, do começo ao fim, sem parar no meio.</p></div></div>
+            <div class="crit"><span class="crit-icon">🎯</span><div><b>Afinação <small>30%</small></b><p>O app descobre a nota que você está cantando e vê se ela está certinha.</p></div></div>
+            <div class="crit"><span class="crit-icon">🎙️</span><div><b>Timbre <small>20%</small></b><p>Voz limpa e firme, sem tremer nem virar sussurro ou chiado.</p></div></div>
+            <div class="crit"><span class="crit-icon">⏱️</span><div><b>Ritmo <small>20%</small></b><p>Começar a cantar na hora certa, junto com a letra.</p></div></div>
+          </div>
+          <p class="hint">💡 Cantar em silêncio não vale, e gritar também não ajuda. O segredo é cantar firme e afinada!</p>
+        </div>
       </div>
     </section>
 
@@ -125,12 +137,16 @@
     <section id="screen-game" class="screen">
       <div id="scoreboard" class="scoreboard"></div>
 
-      <div class="card glass lyrics-card">
-        <div id="ly-prev" class="ly-line ly-prev"></div>
-        <div id="ly-tag" class="ly-tag"></div>
-        <div id="ly-cur" class="ly-line ly-cur"></div>
-        <div id="ly-next-tag" class="ly-tag small"></div>
-        <div id="ly-next" class="ly-line ly-next"></div>
+      <div class="game-center">
+        <div id="turn-banner" class="turn-banner glass">
+          <div id="turn-main" class="turn-main"></div>
+          <div id="turn-sub" class="turn-sub"></div>
+        </div>
+        <div class="card glass lyrics-card">
+          <div id="ly-prev" class="ly-line ly-prev"></div>
+          <div id="ly-cur" class="ly-line ly-cur"></div>
+          <div id="ly-next" class="ly-line ly-next"></div>
+        </div>
       </div>
 
       <div class="game-bottom">

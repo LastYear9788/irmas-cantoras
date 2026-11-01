@@ -352,7 +352,10 @@ net.on('start', async (msg) => {
 
   $('tap-overlay').classList.add('hidden');
   renderScoreboard();
+  bannerKey = '';
+  lastRendered = '';
   setLyrics(-1, -1);
+  updateBanner(-1, -1, -99);
   show('game');
   document.body.classList.add('playing');
 
@@ -453,6 +456,7 @@ function gameLoop(round) {
 
   if (active >= 0) setLyrics(active, k, (lt - lines[active].t) / (lines[active].end - lines[active].t));
   else setLyrics(-1, k);
+  updateBanner(active, k, lt);
 
   // pontuação ao vivo
   const now = performance.now();
@@ -483,24 +487,63 @@ function setLyrics(active, k, progress = 0) {
   $('ly-prev').textContent = prev ? prev.text : '';
   cur.textContent = line ? line.text : (curIdx >= lines.length ? '🎉' : '');
   $('ly-next').textContent = next ? next.text : '';
-
-  const tag = (i, el) => {
-    el.classList.remove('mine');
-    if (i < 0 || i >= lines.length) { el.textContent = ''; return; }
-    const w = g.who[i];
-    el.style.setProperty('--c', colorOf(w));
-    if (w === ALL) el.textContent = state.mode === 'together' || g.players.length < 2 ? 'Canta!' : 'Todas juntas!';
-    else if (w === g.myIndex) { el.textContent = 'Sua vez!'; el.classList.add('mine'); }
-    else el.textContent = `Vez de ${g.players[w] ? g.players[w].name : '?'}`;
-  };
-  tag(curIdx, $('ly-tag'));
-  const nextIdx = curIdx + 1;
-  const changes = next && g.who[nextIdx] !== g.who[curIdx];
-  if (changes) tag(nextIdx, $('ly-next-tag')); else $('ly-next-tag').textContent = '';
-
   cur.style.setProperty('--c', line ? colorOf(g.who[curIdx]) : '#fff');
-  if (line && active < 0) $('ly-tag').classList.remove('mine');
+
+  // o cartão da letra brilha com a cor de quem canta
+  const card = document.querySelector('.lyrics-card');
+  const w = line ? g.who[curIdx] : null;
+  card.style.setProperty('--c', w === null ? 'transparent' : colorOf(w));
+  card.classList.toggle('turn-mine', w !== null && (w === g.myIndex || w === ALL) && g.myIndex >= 0);
+  card.classList.toggle('turn-other', w !== null && w !== g.myIndex && w !== ALL);
   updateScores(active);
+}
+
+/** "SUA VEZ!", "VEZ DE BIA", "TODAS JUNTAS!"… */
+function ownerLabel(w) {
+  const g = state.game;
+  if (w === ALL) return state.mode === 'together' || g.players.length < 2 ? '🎤 CANTA!' : '🎶 TODAS JUNTAS!';
+  if (w === g.myIndex) return '🎤 SUA VEZ!';
+  return `👀 VEZ DE ${(g.players[w] ? g.players[w].name : '?').toUpperCase()}`;
+}
+const isMine = (w) => w === ALL || w === state.game.myIndex;
+
+/** Faixa grande em cima da letra dizendo de quem é a vez (atualiza todo quadro) */
+let bannerKey = '';
+function updateBanner(active, k, lt) {
+  const g = state.game;
+  const lines = g.lines;
+  let main, sub = '', w = null, mode = 'idle';
+
+  if (active >= 0) {
+    w = g.who[active];
+    main = ownerLabel(w);
+    mode = isMine(w) ? 'mine' : 'other';
+    if (isMine(w)) sub = 'Canta agora!';
+    else {
+      // quanto falta pra minha próxima parte
+      const j = lines.findIndex((ln, i) => i > active && isMine(g.who[i]));
+      const secs = j >= 0 ? Math.ceil(lines[j].t - lt) : Infinity;
+      sub = secs <= 10 ? `Sua vez em ${secs}s… prepara!` : 'Descansa e torce 😄';
+    }
+  } else {
+    const nx = lines[k + 1];
+    if (!nx) { main = '🎉 Acabou!'; }
+    else {
+      w = g.who[k + 1];
+      const secs = Math.ceil(nx.t - lt);
+      if (secs > 6) { main = '🎵 Instrumental'; sub = `Depois: ${ownerLabel(w).replace(/^\S+\s/, '').toLowerCase()}`; }
+      else { main = ownerLabel(w); sub = isMine(w) ? `Prepara… ${secs}` : `Em ${secs}s`; mode = isMine(w) ? 'soon' : 'other'; }
+    }
+  }
+
+  const key = main + '|' + sub + '|' + mode;
+  if (key === bannerKey) return;
+  bannerKey = key;
+  const b = $('turn-banner');
+  b.className = 'turn-banner glass ' + mode;
+  b.style.setProperty('--c', w === null ? '#ffffff' : colorOf(w));
+  $('turn-main').textContent = main;
+  $('turn-sub').textContent = sub;
 }
 
 function renderScoreboard() {
@@ -622,9 +665,10 @@ function renderResults() {
         <span class="ptotal">${x.r.total.toLocaleString('pt-BR')}</span>
       </div>
       <div class="bars">
-        ${bar('Presença', x.r.presence)}
-        ${bar('Afinação', x.r.tune)}
-        ${bar('Ritmo', x.r.rhythm)}
+        ${bar('💨 Fôlego', x.r.presence)}
+        ${bar('🎯 Afinação', x.r.tune)}
+        ${bar('🎙️ Timbre', x.r.timbre ?? 0)}
+        ${bar('⏱️ Ritmo', x.r.rhythm)}
       </div>
     </div>`).join('');
 
