@@ -602,6 +602,9 @@ function renderResults() {
   } else if (rows.length === 1) {
     $('result-crown').textContent = '🎤';
     $('result-title').textContent = 'Sua nota';
+  } else if (rows.length > 1 && top.r.total === 0) {
+    $('result-crown').textContent = '😅';
+    $('result-title').textContent = 'Ninguém cantou!';
   } else if (tie) {
     $('result-crown').textContent = '🤝';
     $('result-title').textContent = 'Empate!';

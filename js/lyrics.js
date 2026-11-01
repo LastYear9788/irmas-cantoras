@@ -117,7 +117,12 @@ function pickCandidates(items, videoDuration, wantsVersion, hay) {
     .map((c) => {
       const diff = videoDuration ? Math.abs(c.duration - videoDuration) : 0;
       // versão diferente (remix, ao vivo, cover…) que o vídeo não tem no título = penalidade
-      const extra = (plain(c.track).match(ODD_ALL) || []).filter((w) => !hay.includes(w)).length;
+      let extra = (plain(c.track).match(ODD_ALL) || []).filter((w) => !hay.includes(w)).length;
+      // qualquer outra coisa entre parênteses que o vídeo não tem (ex: "(Pianoforte)", "(Acoustic)") = outra versão
+      for (const m of plain(c.track).matchAll(/[(\[]([^)\]]+)[)\]]/g)) {
+        const words = m[1].replace(/(feat|ft|with|com|part|from|remaster(ed)?|\d{4}|version|versao|radio edit)\.?/g, ' ').trim().split(/\s+/).filter((w) => w.length > 2);
+        if (words.length && !words.every((w) => hay.includes(w))) extra++;
+      }
       return { ...c, diff, score: diff + extra * 30 };
     })
     .sort((x, y) => x.score - y.score)
