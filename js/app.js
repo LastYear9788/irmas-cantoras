@@ -1,10 +1,10 @@
 // Irmãs Cantoras — fluxo do app (telas, lobby, jogo, resultado)
-import { net } from './net.js?v=6';
-import * as yt from './youtube.js?v=6';
-import { findLyrics } from './lyrics.js?v=6';
-import { assignParts, ALL } from './parts.js?v=6';
-import { mic } from './mic.js?v=6';
-import { Scorer } from './score.js?v=6';
+import { net } from './net.js?v=7';
+import * as yt from './youtube.js?v=7';
+import { findLyrics } from './lyrics.js?v=7';
+import { assignParts, ALL } from './parts.js?v=7';
+import { mic } from './mic.js?v=7';
+import { Scorer } from './score.js?v=7';
 
 const COLORS = ['#ff5fa2', '#4fb3ff', '#ffd166', '#7cf29a'];
 const ALL_COLOR = '#b388ff';
@@ -488,7 +488,13 @@ function setLyrics(active, k, progress = 0) {
   const prev = lines[curIdx - 1], line = lines[curIdx], next = lines[curIdx + 1];
   $('ly-prev').textContent = prev ? prev.text : '';
   cur.textContent = line ? line.text : (curIdx >= lines.length ? '🎉' : '');
-  $('ly-next').textContent = next ? next.text : '';
+  const nextEl = $('ly-next');
+  nextEl.textContent = next ? next.text : '';
+  const nw = next ? g.who[curIdx + 1] : null;
+  const handoff = !!(next && line && nw !== g.who[curIdx]);
+  nextEl.classList.toggle('handoff', handoff);
+  nextEl.style.setProperty('--nc', next ? colorOf(nw) : '#fff');
+  nextEl.dataset.who = !handoff ? '' : nw === ALL ? 'todas ↓' : nw === g.myIndex ? 'você ↓' : `${(g.players[nw] || {}).name || '?'} ↓`;
   cur.style.setProperty('--c', line ? colorOf(g.who[curIdx]) : '#fff');
 
   // o cartão da letra brilha com a cor de quem canta
@@ -510,31 +516,50 @@ function ownerLabel(w) {
 const isMine = (w) => w === ALL || w === state.game.myIndex;
 
 /** Faixa grande em cima da letra dizendo de quem é a vez (atualiza todo quadro) */
+const SOON = 5;   // segundos de aviso antes da minha vez
 let bannerKey = '';
 function updateBanner(active, k, lt) {
   const g = state.game;
   const lines = g.lines;
   let main, sub = '', w = null, mode = 'idle';
 
-  if (active >= 0) {
+  // quanto falta pra minha próxima parte (a partir da linha "from")
+  const untilMine = (from) => {
+    const j = lines.findIndex((ln, i) => i >= from && isMine(g.who[i]));
+    return j < 0 ? null : { j, secs: Math.ceil(lines[j].t - lt) };
+  };
+  // contagem regressiva grande, na minha cor
+  const countdownTo = (m) => {
+    w = g.who[m.j];
+    mode = 'soon';
+    main = m.secs <= 1 ? '🎤 VAI!' : `⏳ SUA VEZ EM ${m.secs}`;
+    sub = m.secs <= 1 ? 'Agora!' : 'Prepara!';
+  };
+
+  if (active >= 0 && isMine(g.who[active])) {
     w = g.who[active];
     main = ownerLabel(w);
-    mode = isMine(w) ? 'mine' : 'other';
-    if (isMine(w)) sub = 'Canta agora!';
+    mode = 'mine';
+    sub = 'Canta agora!';
+  } else if (active >= 0) {
+    const m = untilMine(active + 1);
+    if (m && m.secs <= SOON) countdownTo(m);
     else {
-      // quanto falta pra minha próxima parte
-      const j = lines.findIndex((ln, i) => i > active && isMine(g.who[i]));
-      const secs = j >= 0 ? Math.ceil(lines[j].t - lt) : Infinity;
-      sub = secs <= 10 ? `Sua vez em ${secs}s… prepara!` : 'Descansa e torce 😄';
+      w = g.who[active];
+      main = ownerLabel(w);
+      mode = 'other';
+      sub = m && m.secs <= 10 ? `Sua vez em ${m.secs}s` : 'Descansa e torce 😄';
     }
   } else {
     const nx = lines[k + 1];
-    if (!nx) { main = '🎉 Acabou!'; }
+    const m = untilMine(k + 1);
+    if (!nx) main = '🎉 Acabou!';
+    else if (m && m.j === k + 1 && m.secs <= SOON) countdownTo(m);
     else {
       w = g.who[k + 1];
       const secs = Math.ceil(nx.t - lt);
       if (secs > 6) { main = '🎵 Instrumental'; sub = `Depois: ${ownerLabel(w).replace(/^\S+\s/, '').toLowerCase()}`; }
-      else { main = ownerLabel(w); sub = isMine(w) ? `Prepara… ${secs}` : `Em ${secs}s`; mode = isMine(w) ? 'soon' : 'other'; }
+      else { main = ownerLabel(w); sub = `Em ${secs}s`; mode = 'other'; }
     }
   }
 
@@ -546,6 +571,10 @@ function updateBanner(active, k, lt) {
   b.style.setProperty('--c', w === null ? '#ffffff' : colorOf(w));
   $('turn-main').textContent = main;
   $('turn-sub').textContent = sub;
+  // o cartão da letra também pisca na minha cor durante a contagem
+  const card = document.querySelector('.lyrics-card');
+  card.classList.toggle('turn-soon', mode === 'soon');
+  card.style.setProperty('--sc', w === null ? '#ffffff' : colorOf(w));
 }
 
 function renderScoreboard() {

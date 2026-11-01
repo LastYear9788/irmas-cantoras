@@ -302,3 +302,14 @@ main { position: relative; z-index: 2; min-height: 100vh; }
   transition: opacity 0.15s, transform 0.25s var(--spring);
 }
 .tip-word:hover::after { opacity: 1; transform: translate(-50%, 0); }
+
+/* ---------- aviso de troca de vez ---------- */
+.turn-banner.soon { transform: scale(1.1); animation: turnpulse 0.6s ease-in-out infinite; }
+.turn-banner.soon .turn-main { font-size: clamp(30px, 4.4vw, 48px); }
+.lyrics-card.turn-soon { border-color: color-mix(in srgb, var(--sc) 80%, transparent); animation: cardpulse 0.6s ease-in-out infinite; }
+@keyframes cardpulse { 50% { box-shadow: 0 0 70px color-mix(in srgb, var(--sc) 45%, transparent), inset 0 1px 0 rgba(255,255,255,0.45); } }
+.ly-next.handoff { color: color-mix(in srgb, var(--nc) 75%, white); opacity: 0.9; }
+.ly-next.handoff::before {
+  content: attr(data-who); display: block; margin-bottom: 2px;
+  font-size: 12px; font-weight: 800; letter-spacing: 0.15em; text-transform: uppercase; color: var(--nc);
+}
