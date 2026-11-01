@@ -1,5 +1,6 @@
 // Microfone: volume e altura (pitch) da voz, direto no navegador.
 
+let half = null;
 let ctx = null, analyser = null, buf = null, stream = null, src = null;
 let mon = null, monToken = 0;   // "me ouvir": voz indo direto pro fone
 function stopMonitor() {
@@ -34,6 +35,7 @@ export const mic = {
     analyser.fftSize = 2048;
     src.connect(analyser);
     buf = new Float32Array(analyser.fftSize);
+    half = new Float32Array(analyser.fftSize / 2);
     mic.active = true;
     calibrate();
     // fio puxado / fone bluetooth desligou
@@ -99,7 +101,8 @@ export const mic = {
   read() {
     if (!mic.active) return { rms: 0, level: 0, pitch: 0, voiced: false };
     const now = performance.now();
-    if (last && now - lastAt < 8) return last;   // já leu neste quadro
+    // ~30 leituras por segundo bastam (e poupam PC fraco: a afinação é a conta mais pesada do jogo)
+    if (last && now - lastAt < 30) return last;
     lastAt = now;
     if (ctx.state === 'suspended') ctx.resume();
     analyser.getFloatTimeDomainData(buf);
@@ -107,7 +110,14 @@ export const mic = {
     for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
     const rms = Math.sqrt(sum / buf.length);
     const loud = rms > Math.max(0.012, noiseFloor * 2.5);
-    const pitch = loud ? detectPitch(buf, ctx.sampleRate) : 0;
+    let pitch = 0;
+    if (loud) {
+      // metade das amostras (média de 2 em 2): voz vai até ~1100 Hz, então 24 mil por segundo sobra
+      if (ctx.sampleRate >= 32000) {
+        for (let i = 0; i < half.length; i++) half[i] = (buf[2 * i] + buf[2 * i + 1]) * 0.5;
+        pitch = detectPitch(half, ctx.sampleRate / 2);
+      } else pitch = detectPitch(buf, ctx.sampleRate);
+    }
     last = { rms, level: Math.min(1, rms * 8), pitch, voiced: loud && pitch > 0, clarity: pitch > 0 ? lastClarity : 0 };
     return last;
   },

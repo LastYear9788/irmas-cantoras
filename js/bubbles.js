@@ -4,6 +4,9 @@ const COLORS = ['255,95,162', '79,179,255', '155,92,255', '255,209,102', '124,24
 
 let box = null, list = [], raf = 0, last = 0, running = false;
 let W = 0, H = 0;
+let paused = false, frozen = false;
+// medidor de fôlego do PC: se ficar abaixo de ~45 quadros por segundo, avisa (modo leve)
+let slowCb = null, perfStart = 0, perfSum = 0, perfN = 0, slowLevel = 0;
 const mouse = { x: -1e4, y: -1e4, vx: 0, vy: 0, has: false };
 let resizeT = 0;
 const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -41,8 +44,10 @@ function draw(b) {
 function step(now) {
   if (!running) return;
   raf = requestAnimationFrame(step);
-  const dt = Math.min(3, last ? (now - last) / (1000 / 60) : 1);
+  const gap = last ? now - last : 16.7;
+  const dt = Math.min(3, gap / (1000 / 60));
   last = now;
+  checkPerf(now, gap);
   const fr = Math.pow(0.97, dt);
 
   for (const b of list) {
@@ -105,6 +110,32 @@ function step(now) {
   mouse.vx *= 0.85; mouse.vy *= 0.85;
 }
 
+function checkPerf(now, gap) {
+  if (slowLevel >= 2 || !slowCb) return;
+  if (!perfStart) { perfStart = now + 1200; return; }     // ignora o comecinho (carregando)
+  if (now < perfStart || gap > 250) return;               // aba escondida / travada de propósito não conta
+  perfSum += gap; perfN++;
+  if (now - perfStart > 2000) {
+    if (perfSum / perfN > 22) { slowLevel++; slowCb(slowLevel); }
+    perfStart = now; perfSum = 0; perfN = 0;
+  }
+}
+
+/** Chama fn(1) e depois fn(2) se o PC continuar sem dar conta da animação. */
+export function onSlow(fn) { slowCb = fn; }
+
+/** Pausa/volta a animação (durante a música o vídeo cobre tudo: não precisa gastar PC). */
+export function pauseBubbles(p) {
+  if (frozen) p = true;
+  if (!running || paused === p || reduced()) { paused = p; return; }
+  paused = p;
+  if (p) cancelAnimationFrame(raf);
+  else { last = 0; perfStart = 0; perfSum = 0; perfN = 0; raf = requestAnimationFrame(step); }
+}
+
+/** PC bem fraco: bolhas ficam paradas de vez. */
+export function freezeBubbles() { pauseBubbles(true); frozen = true; }
+
 function onMove(e) {
   if (e.pointerType === 'touch') return;
   if (mouse.has) { mouse.vx = e.clientX - mouse.x; mouse.vy = e.clientY - mouse.y; }
@@ -141,8 +172,8 @@ export function startBubbles() {
   addEventListener('pointermove', onMove, { passive: true });
   addEventListener('pointerdown', onDown, { passive: true });
   document.addEventListener('pointerleave', onLeave);
-  last = 0;
-  raf = requestAnimationFrame(step);
+  last = 0; perfStart = 0;
+  if (!paused) raf = requestAnimationFrame(step);
 }
 
 export function stopBubbles() {

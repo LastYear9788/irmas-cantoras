@@ -61,6 +61,9 @@ button, input, textarea { font: inherit; color: inherit; }
 body.playing #video-wrap, body.replay #video-wrap { opacity: 1; }
 body.playing .blobs, body.replay .blobs { opacity: 0.4; }
 body.playing .bubbles, body.replay .bubbles { opacity: 0.25; }
+/* com o vídeo cobrindo tudo, o fundo para de ser desenhado (poupa PC fraco); espera o vídeo aparecer */
+body.playing .blobs, body.replay .blobs, body.playing .bubbles, body.replay .bubbles,
+body.playing .frost, body.replay .frost { visibility: hidden; transition: visibility 0s linear 0.9s, opacity 0.8s ease; }
 
 /* ---------- telas ---------- */
 main { position: relative; z-index: 2; min-height: 100vh; }
@@ -435,3 +438,6 @@ main { position: relative; z-index: 2; min-height: 100vh; }
 .theme-btn:hover { opacity: 1; }
 body.playing .theme-btn { display: none; }
 @media (max-width: 760px) { .screen { padding-top: 56px; } }
+
+/* PC bem fraco (detectado sozinho): fundo parado */
+.still .blob { animation-play-state: paused; }
