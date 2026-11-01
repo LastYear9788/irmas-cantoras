@@ -221,7 +221,8 @@ async function loadSong() {
     const ly = await findLyrics(info.title, info.author, info.duration);
     if (loadingId !== id) return;
     state.song = { videoId: id, title: info.title, lines: ly.lines, artist: ly.artist, track: ly.track };
-    songCard(id, info.title, `Letra encontrada ✓ (${ly.artist} – ${ly.track})`, 'ok');
+    if (ly.diff > 8) songCard(id, info.title, `Letra encontrada ✓ (${ly.artist} – ${ly.track}). ⚠️ Esse vídeo tem partes a mais que a música, a letra pode ficar fora do tempo. Se der, usa o link do "áudio oficial".`, 'ok');
+    else songCard(id, info.title, `Letra encontrada ✓ (${ly.artist} – ${ly.track})`, 'ok');
     broadcastSetup();
   } catch (e) {
     if (loadingId !== id) return;
