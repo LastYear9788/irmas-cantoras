@@ -1,11 +1,12 @@
 // Irmãs Cantoras — fluxo do app (telas, lobby, jogo, resultado)
-import { net } from './net.js?v=15';
-import * as yt from './youtube.js?v=15';
-import { findLyrics } from './lyrics.js?v=15';
-import { assignParts, ALL } from './parts.js?v=15';
-import { mic } from './mic.js?v=15';
-import { Scorer } from './score.js?v=15';
-import { cam } from './cam.js?v=15';
+import { net } from './net.js?v=18';
+import * as yt from './youtube.js?v=18';
+import { findLyrics } from './lyrics.js?v=18';
+import { assignParts, ALL } from './parts.js?v=18';
+import { mic, roomLabel } from './mic.js?v=18';
+import { Scorer } from './score.js?v=18';
+import { cam } from './cam.js?v=18';
+import { anim } from './anim.js?v=18';
 
 const COLORS = ['#ff5fa2', '#4fb3ff', '#ffd166', '#7cf29a'];
 const ALL_COLOR = '#b388ff';
@@ -33,8 +34,13 @@ const state = {
 /* ============================================================
    Utilidades de tela
    ============================================================ */
+let currentScreen = 'home';
 function show(screen) {
   document.querySelectorAll('.screen').forEach((s) => s.classList.toggle('active', s.id === 'screen-' + screen));
+  if (screen === currentScreen) return;
+  currentScreen = screen;
+  if (screen === 'result') anim._crown = '';
+  anim.screen($('screen-' + screen));
 }
 
 let toastTimer;
@@ -139,7 +145,7 @@ $('in-name').addEventListener('keydown', (e) => {
    ============================================================ */
 function enterLobby() {
   $('home-msg').textContent = '';
-  $('room-code').textContent = net.code;
+  anim.roomCode($('room-code'), net.code);
   $('guest-song-hint').classList.add('hidden');
   $('in-url').placeholder = net.isHost ? 'Cole um link do YouTube aqui' : 'Cole um link pra sugerir uma música';
   $('btn-load').textContent = net.isHost ? 'Adicionar' : 'Sugerir';
@@ -192,6 +198,7 @@ function renderLobby() {
 
   $('btn-ready').textContent = state.ready ? 'Pronta ✓ (clique pra desmarcar)' : 'Estou pronta!';
   $('btn-ready').classList.toggle('is-on', state.ready);
+  anim.lobby(list, net.players);
 }
 
 net.on('players', () => {
@@ -257,10 +264,13 @@ function meterTick() {
   const m = mic.read();
   $('mic-meter').style.width = (m.level * 100) + '%';
   $('game-meter').style.width = (m.level * 100) + '%';
+  if (currentScreen === 'game') anim.voice($('game-mic-icon'), m.level);
+  else if (currentScreen === 'lobby') anim.voice($('lobby-mic-icon'), m.level);
   requestAnimationFrame(meterTick);
 }
 
 $('btn-ready').onclick = async () => {
+  anim.press($('btn-ready'));
   if (!state.ready && !mic.active) {
     if (!(await startMic())) { toast('Precisa ligar o microfone pra jogar 🎤'); return; }
   }
@@ -562,7 +572,7 @@ net.on('start', async (msg) => {
   state.photos = Object.create(null);
   renderPhotos();
   clearRecording();
-  if (myIndex >= 0) mic.monitor(hearMe);
+  if (myIndex >= 0) { if (hearMe) startHear(); else mic.monitor(false); }
 
   $('tap-overlay').classList.add('hidden');
   renderScoreboard();
@@ -602,7 +612,7 @@ function countdown(round) {
     const n = Math.ceil(left / 1000);
     const el = $('countdown-num');
     const txt = n > 3 ? '🎤' : String(n);
-    if (el.textContent !== txt) { el.textContent = txt; el.style.animation = 'none'; void el.offsetWidth; el.style.animation = ''; }
+    if (el.textContent !== txt && !anim.count(el, txt)) { el.textContent = txt; el.style.animation = 'none'; void el.offsetWidth; el.style.animation = ''; }
     // setTimeout (e não requestAnimationFrame) porque continua rodando com a janela minimizada
     setTimeout(tick, Math.min(100, left));
   };
@@ -806,7 +816,7 @@ function updateScores(active) {
   const g = state.game; if (!g) return;
   g.players.forEach((p, i) => {
     const el = $('pscore-' + i);
-    if (el) el.textContent = (state.live[p.id] || 0).toLocaleString('pt-BR');
+    anim.liveScore(el, state.live[p.id] || 0);
     const pill = $('pill-' + i);
     if (pill) pill.classList.toggle('singing', active >= 0 && (g.who[active] === ALL || g.who[active] === i));
   });
@@ -828,6 +838,7 @@ function renderMute() {
   $('btn-mute').classList.toggle('is-on', musicOff);
 }
 $('btn-mute').onclick = () => {
+  anim.press($('btn-mute'));
   musicOff = !musicOff;
   localStorage.setItem('ic-music-off', musicOff ? '1' : '0');
   yt.setMuted(musicOff);
@@ -839,18 +850,58 @@ renderMute();
 
 /* ---------- me ouvir (voz no fone enquanto canta) ---------- */
 let hearMe = localStorage.getItem('ic-hear') === '1';
+let warnedSlow = false;
 function renderHear() {
   $('btn-hear').textContent = hearMe ? '🎧 Me ouvindo' : '🎧 Me ouvir';
   $('btn-hear').classList.toggle('is-on', hearMe);
+  $('btn-fx').classList.toggle('hidden', !hearMe);
+  if (!hearMe) $('fx-panel').classList.add('hidden');
+}
+// liga o retorno e avisa se o fone/PC estiver atrasando a voz (fone bluetooth costuma passar de 0,15s)
+function startHear() {
+  mic.monitor(true).then((lat) => {
+    if (lat == null || warnedSlow || lat < 0.08) return;
+    warnedSlow = true;
+    toast(`Sua voz está chegando com ${Math.round(lat * 1000)} ms de atraso. Isso costuma ser fone Bluetooth: com fone com fio fica instantâneo 🎧`, 8000);
+  });
 }
 $('btn-hear').onclick = () => {
+  anim.press($('btn-hear'));
   hearMe = !hearMe;
   localStorage.setItem('ic-hear', hearMe ? '1' : '0');
   const g = state.game;
-  if (g && !g.finished && g.myIndex >= 0) mic.monitor(hearMe);
+  if (g && !g.finished && g.myIndex >= 0) { if (hearMe) startHear(); else mic.monitor(false); }
   renderHear();
   toast(hearMe ? 'Agora você escuta sua voz 🎧 Só use com fone de ouvido, senão dá microfonia!' : 'Não está mais escutando sua voz', 4500);
 };
+function renderFx() {
+  const f = mic.fx;
+  $('fx-reverb').value = Math.round(f.reverb * 100);
+  $('fx-reverb-val').textContent = f.reverb ? Math.round(f.reverb * 100) + '%' : 'desligado';
+  $('fx-room').value = Math.round(f.room * 100);
+  $('fx-room-val').textContent = roomLabel(f.room);
+  $('fx-echo').checked = f.echo;
+  $('fx-vol').value = Math.round(f.vol * 100);
+  $('fx-vol-val').textContent = Math.round(f.vol * 100) + '%';
+}
+$('btn-fx').onclick = (e) => { e.stopPropagation(); anim.press($('btn-fx')); anim.panel($('fx-panel'), $('fx-panel').classList.contains('hidden')); };
+$('fx-panel').onclick = (e) => e.stopPropagation();
+document.addEventListener('click', () => anim.panel($('fx-panel'), false));
+$('fx-reverb').oninput = (e) => {
+  const was = mic.fx.reverb > 0;
+  mic.setFx({ reverb: e.target.value / 100 }); renderFx();
+  if (was !== mic.fx.reverb > 0) anim.bump($('fx-reverb-val'));
+};
+// tamanho da sala: o nome atualiza na hora, o som troca quando para de arrastar (ou a cada 0,15 s)
+let roomTimer = null;
+$('fx-room').oninput = (e) => {
+  $('fx-room-val').textContent = roomLabel(e.target.value / 100);
+  clearTimeout(roomTimer);
+  roomTimer = setTimeout(() => { mic.setFx({ room: e.target.value / 100 }); anim.room($('fx-room-val'), e.target.value / 100); }, 150);
+};
+$('fx-echo').onchange = (e) => { mic.setFx({ echo: e.target.checked }); anim.press(e.target.parentElement); };
+$('fx-vol').oninput = (e) => { mic.setFx({ vol: e.target.value / 100 }); renderFx(); };
+renderFx();
 renderHear();
 
 /* ---------- gravação: ouvir a música inteira depois ---------- */
@@ -1001,7 +1052,7 @@ function renderResults() {
 
   const bar = (label, v) => `<span>${label}</span><div class="bar"><div style="width:${v}%"></div></div><span>${v}%</span>`;
   $('result-list').innerHTML = done.map((x, pos) => `
-    <div class="result-item ${complete && pos === 0 && !tie && rows.length > 1 ? 'winner' : ''}" style="--c:${colorOf(x.i)}; animation-delay:${pos * 0.12}s">
+    <div class="result-item ${complete && pos === 0 && !tie && rows.length > 1 ? 'winner' : ''}" data-id="${esc(x.id)}" data-total="${x.r.total}" style="--c:${colorOf(x.i)}; animation-delay:${pos * 0.12}s">
       <div class="result-top">
         <span class="dot" style="color:${colorOf(x.i)}"></span>
         <span class="pname">${esc(x.name)}${x.id === net.myId ? ' <span class="hint">(você)</span>' : ''}</span>
@@ -1020,6 +1071,9 @@ function renderResults() {
   $('result-wait').textContent = missing.length && !g.timeout
     ? `Esperando a nota de ${missing.map((x) => x.name).join(', ')}…`
     : (missing.length ? `${missing.map((x) => x.name).join(', ')} não mandou a nota.` : '');
+  anim.crown($('result-crown'));
+  anim.results($('result-list'), g.round);
+  if (complete && top && !tie && rows.length > 1 && top.r.total > 0) anim.confetti('r' + g.round, [colorOf(top.i), '#ffd166', '#ffffff']);
   renderNight();
 }
 
@@ -1031,6 +1085,7 @@ document.querySelectorAll('.react').forEach((b) => {
     const now = Date.now();
     if (now - lastReact < 400 || !state.game) return;   // sem metralhadora de emoji
     lastReact = now;
+    anim.reactBtn(b);
     net.broadcast({ type: 'react', emoji: b.dataset.e });
   };
 });
@@ -1048,7 +1103,7 @@ net.on('react', (msg) => {
   el.style.setProperty('--c', idx >= 0 ? colorOf(idx) : '#fff');
   el.innerHTML = `<span class="r-emoji">${msg.emoji}</span><span class="r-name">${esc(name)}</span>`;
   $('reactions').appendChild(el);
-  setTimeout(() => el.remove(), 3100);
+  if (!anim.reaction(el)) setTimeout(() => el.remove(), 3100);
 });
 
 /* ---------- câmera e fotos da rodada ---------- */

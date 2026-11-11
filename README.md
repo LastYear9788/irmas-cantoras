@@ -43,6 +43,7 @@ Site estático, sem build: HTML + CSS + JavaScript puro.
 - `js/parts.js`: quem canta cada linha.
 - `js/mic.js` / `js/score.js`: microfone, afinação e nota.
 - `js/app.js`: telas e fluxo.
+- `js/anim.js`: animações das interações com [GSAP](https://gsap.com) (`js/vendor/gsap.min.js`). Se o GSAP não carregar, o sistema pedir menos movimento ou o PC for fraco, fica só com as animações simples do CSS.
 
 Rodar no PC: `python -m http.server 8000` nesta pasta e abrir `http://localhost:8000`.
 Hospedagem: GitHub Pages (grátis).

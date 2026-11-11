@@ -441,3 +441,29 @@ body.playing .theme-btn { display: none; }
 
 /* PC bem fraco (detectado sozinho): fundo parado */
 .still .blob { animation-play-state: paused; }
+
+/* efeitos do "me ouvir" */
+.fx-wrap { position: relative; }
+.fx-panel {
+  position: absolute; bottom: calc(100% + 10px); left: 50%; transform: translateX(-50%);
+  width: 290px; padding: 14px 16px; border-radius: 18px; z-index: 30;
+  display: flex; flex-direction: column; gap: 12px; font-size: 14px;
+}
+.fx-panel label { display: flex; flex-direction: column; gap: 6px; }
+.fx-panel .fx-row { display: flex; justify-content: space-between; gap: 8px; }
+.fx-panel label b { font-weight: 600; opacity: 0.8; white-space: nowrap; }
+.fx-panel .fx-check { flex-direction: row; align-items: center; gap: 8px; cursor: pointer; }
+.fx-panel input[type=range] { width: 100%; accent-color: #7cf29a; cursor: pointer; }
+.fx-panel input[type=checkbox] { accent-color: #7cf29a; width: 16px; height: 16px; }
+
+/* ---------- animações (GSAP) ---------- */
+.room-code .rc-ch { display: inline-block; }
+.mic-icon { display: inline-block; --glow: 0; filter: drop-shadow(0 0 calc(var(--glow) * 14px) rgba(255,95,162,0.95)); will-change: transform; }
+.fx-panel .fx-row b { position: relative; }
+.fx-ripple {
+  position: absolute; left: 50%; top: 50%; width: 22px; height: 22px; margin: -11px 0 0 -11px;
+  border-radius: 50%; border: 2px solid rgba(124,242,154,0.8); pointer-events: none;
+}
+.confetti { position: fixed; inset: 0; pointer-events: none; z-index: 40; overflow: hidden; }
+.confetti i { position: absolute; left: 0; top: 0; width: 9px; height: 14px; border-radius: 2px; }
+@media (prefers-reduced-motion: reduce) { .reaction, .countdown-num, .screen.active, .result-item { animation-duration: 0.01s !important; } }
