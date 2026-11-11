@@ -5,11 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Irmãs Cantoras</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎤</text></svg>">
-  <link rel="stylesheet" href="css/glass.css?v=16">
+  <link rel="stylesheet" href="css/glass.css?v=17">
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <script>document.documentElement.classList.toggle('theme-new', localStorage.getItem('ic-theme') !== 'classic');</script>
-  <script type="module" src="js/app.js?v=16"></script>
-  <script type="module" src="js/theme.js?v=16"></script>
+  <script type="module" src="js/app.js?v=17"></script>
+  <script type="module" src="js/theme.js?v=17"></script>
 </head>
 <body>
   <!-- Fundo animado (é o que dá vida ao vidro) -->
@@ -178,10 +178,17 @@
           <button id="btn-sync-plus" class="mini" title="Letra adiantada? Clique aqui">+</button>
         </div>
         <button id="btn-hear" class="btn btn-small" title="Escutar sua própria voz no fone enquanto canta">🎧 Me ouvir</button>
-        <div id="fx-pill" class="glass pill fx-pill hidden" title="Efeito e volume da sua voz no fone">
-          <span>✨</span>
-          <select id="fx-select" aria-label="Efeito na voz"></select>
-          <input id="mon-vol" type="range" min="0" max="150" step="5" aria-label="Volume da sua voz no fone">
+        <div class="fx-wrap">
+          <button id="btn-fx" class="btn btn-small hidden" title="Reverb, tamanho da sala, eco e volume da sua voz no fone">✨ Efeitos</button>
+          <div id="fx-panel" class="glass fx-panel hidden">
+            <label><span class="fx-row">Reverb <b id="fx-reverb-val"></b></span>
+              <input id="fx-reverb" type="range" min="0" max="100" step="1"></label>
+            <label><span class="fx-row">Tamanho da sala <b id="fx-room-val"></b></span>
+              <input id="fx-room" type="range" min="0" max="100" step="1"></label>
+            <label class="fx-check"><input id="fx-echo" type="checkbox"> Eco</label>
+            <label><span class="fx-row">Volume da sua voz <b id="fx-vol-val"></b></span>
+              <input id="fx-vol" type="range" min="0" max="150" step="5"></label>
+          </div>
         </div>
         <button id="btn-mute" class="btn btn-small" title="Cantar sem a música (só no seu PC)">🔊 Música ligada</button>
         <button id="btn-end" class="btn btn-small">Encerrar</button>

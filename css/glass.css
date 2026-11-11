@@ -442,11 +442,16 @@ body.playing .theme-btn { display: none; }
 /* PC bem fraco (detectado sozinho): fundo parado */
 .still .blob { animation-play-state: paused; }
 
-/* efeito e volume do "me ouvir" */
-.fx-pill { display: flex; align-items: center; gap: 8px; padding: 6px 12px; }
-.fx-pill select {
-  background: rgba(255,255,255,0.14); color: inherit; border: 1px solid rgba(255,255,255,0.25);
-  border-radius: 999px; padding: 5px 10px; font: inherit; font-size: 14px; cursor: pointer;
+/* efeitos do "me ouvir" */
+.fx-wrap { position: relative; }
+.fx-panel {
+  position: absolute; bottom: calc(100% + 10px); left: 50%; transform: translateX(-50%);
+  width: 250px; padding: 14px 16px; border-radius: 18px; z-index: 30;
+  display: flex; flex-direction: column; gap: 12px; font-size: 14px;
 }
-.fx-pill select option { color: #111; }
-.fx-pill input[type=range] { width: 90px; accent-color: #7cf29a; cursor: pointer; }
+.fx-panel label { display: flex; flex-direction: column; gap: 6px; }
+.fx-panel .fx-row { display: flex; justify-content: space-between; gap: 8px; }
+.fx-panel label b { font-weight: 600; opacity: 0.8; }
+.fx-panel .fx-check { flex-direction: row; align-items: center; gap: 8px; cursor: pointer; }
+.fx-panel input[type=range] { width: 100%; accent-color: #7cf29a; cursor: pointer; }
+.fx-panel input[type=checkbox] { accent-color: #7cf29a; width: 16px; height: 16px; }

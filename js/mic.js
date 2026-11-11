@@ -11,17 +11,35 @@ function stopMonitor() {
 }
 
 /* ---------- efeitos do "me ouvir" ---------- */
-// reverb: tempo da cauda (s), quanto de efeito, atraso antes do reverb (s), brilho (0 escuro, 1 claro)
-export const EFFECTS = {
-  off:      { label: 'Sem efeito' },
-  sala:     { label: 'Sala',      rev: 0.9, wet: 0.28, pre: 0.008, bright: 0.55 },
-  palco:    { label: 'Palco',     rev: 1.9, wet: 0.34, pre: 0.018, bright: 0.5 },
-  catedral: { label: 'Catedral',  rev: 4.2, wet: 0.42, pre: 0.035, bright: 0.4 },
-  eco:      { label: 'Eco',       echo: 0.3, fb: 0.38, wet: 0.36, rev: 1.0, revWet: 0.15, pre: 0.01, bright: 0.5 },
-};
-let effect = localStorage.getItem('ic-fx') || 'off';
-if (!EFFECTS[effect]) effect = 'off';
-let monVol = Math.min(1.5, Math.max(0, parseFloat(localStorage.getItem('ic-mon-vol') || '1') || 1));
+// fx.reverb: quanto reverb (0 = desligado, 1 = máximo)
+// fx.room:   tamanho da sala (0 = quarto pequeno, 1 = catedral)
+// fx.echo:   eco ligado/desligado
+// fx.vol:    volume da voz no fone (0 a 1,5)
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, Number.isFinite(v) ? v : lo));
+const fx = (() => {
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem('ic-fx2') || '{}') || {}; } catch (e) { /* ok */ }
+  return {
+    reverb: clamp(parseFloat(saved.reverb ?? 0.35), 0, 1),
+    room: clamp(parseFloat(saved.room ?? 0.4), 0, 1),
+    echo: !!saved.echo,
+    vol: clamp(parseFloat(saved.vol ?? 1), 0, 1.5),
+  };
+})();
+const saveFx = () => { try { localStorage.setItem('ic-fx2', JSON.stringify(fx)); } catch (e) { /* ok */ } };
+
+// como o tamanho da sala vira som: sala maior = cauda mais longa, mais espera antes
+// do reverb começar e som mais abafado
+function roomParams(room) {
+  return {
+    secs: Math.round((0.3 + Math.pow(room, 1.5) * 5.2) * 20) / 20,  // 0,3 s a 5,5 s
+    pre: 0.002 + room * 0.045,                                       // 2 a 47 ms
+    bright: Math.round((0.7 - room * 0.35) * 20) / 20,
+  };
+}
+export function roomLabel(room) {
+  return room < 0.2 ? 'Quarto' : room < 0.4 ? 'Sala' : room < 0.6 ? 'Estúdio grande' : room < 0.8 ? 'Teatro' : 'Catedral';
+}
 
 // "resposta" de uma sala inventada: chiado estéreo que vai sumindo e escurecendo
 const irCache = new Map();
@@ -35,43 +53,57 @@ function impulse(c, secs, bright) {
     let lp = 0;
     for (let i = 0; i < len; i++) {
       const t = i / len;
-      // quanto mais pro fim, mais abafado (como numa sala de verdade)
-      const k = bright * (1 - t) + 0.05;
+      const k = bright * (1 - t) + 0.05; // quanto mais pro fim, mais abafado (como numa sala de verdade)
       lp += k * ((Math.random() * 2 - 1) - lp);
       d[i] = lp * Math.pow(1 - t, 3.2);
     }
   }
+  if (irCache.size > 12) irCache.clear();
   irCache.set(key, ir);
   return ir;
 }
 
-function reverbInto(c, from, to, fx, wet) {
-  const pre = c.createDelay(0.2); pre.delayTime.value = fx.pre || 0;
-  const hp = c.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 180; // sem embolar os graves
-  const conv = c.createConvolver(); conv.buffer = impulse(c, fx.rev, fx.bright);
-  const g = c.createGain(); g.gain.value = wet;
-  from.connect(pre); pre.connect(hp); hp.connect(conv); conv.connect(g); g.connect(to);
-  return [pre, hp, conv, g];
-}
+const fade = (g, c, to) => g.gain.setTargetAtTime(to, c.currentTime, 0.05);
+const unplug = (nodes) => nodes.forEach((n) => { try { n.disconnect(); } catch (e) { /* ok */ } });
 
-// monta (ou troca) o efeito sem reabrir o microfone; a voz seca nunca passa pelo efeito,
-// então ligar reverb não acrescenta atraso nenhum
-function applyEffect() {
+// reverb: monta um novo e faz a troca suave (sem estalo) quando a sala muda
+function buildReverb() {
   if (!mon) return;
   const { c, input, out } = mon;
-  mon.fx.forEach((n) => { try { n.disconnect(); } catch (e) { /* ok */ } });
-  mon.fx = [];
-  const fx = EFFECTS[effect];
-  if (fx.echo) {
-    const d = c.createDelay(2); d.delayTime.value = fx.echo;
-    const fb = c.createGain(); fb.gain.value = fx.fb;
+  const old = mon.rev;
+  const p = roomParams(fx.room);
+  const pre = c.createDelay(0.2); pre.delayTime.value = p.pre;
+  const hp = c.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 180; // sem embolar os graves
+  const conv = c.createConvolver(); conv.buffer = impulse(c, p.secs, p.bright);
+  const g = c.createGain(); g.gain.value = 0;
+  input.connect(pre); pre.connect(hp); hp.connect(conv); conv.connect(g); g.connect(out);
+  mon.rev = { g, nodes: [pre, hp, conv, g], key: p.secs + ':' + p.bright };
+  fade(g, c, fx.reverb * 0.7);
+  if (old) { fade(old.g, c, 0); setTimeout(() => unplug(old.nodes), 400); }
+}
+
+function buildEcho() {
+  if (!mon) return;
+  const { c, input, out } = mon;
+  if (!mon.echo) {
+    const d = c.createDelay(2); d.delayTime.value = 0.3;
+    const fb = c.createGain(); fb.gain.value = 0.38;
     const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 3200; // cada repetição mais abafada
-    const g = c.createGain(); g.gain.value = fx.wet;
+    const g = c.createGain(); g.gain.value = 0;
     input.connect(d); d.connect(lp); lp.connect(fb); fb.connect(d); lp.connect(g); g.connect(out);
-    mon.fx.push(d, fb, lp, g, ...reverbInto(c, input, out, fx, fx.revWet));
-  } else if (fx.rev) {
-    mon.fx.push(...reverbInto(c, input, out, fx, fx.wet));
+    mon.echo = { g };
   }
+  fade(mon.echo.g, c, fx.echo ? 0.35 : 0);
+}
+
+// a voz seca nunca passa pelos efeitos: eles tocam em paralelo, então não somam atraso
+function applyFx() {
+  if (!mon) return;
+  const p = roomParams(fx.room);
+  if (!mon.rev || mon.rev.key !== p.secs + ':' + p.bright) buildReverb();
+  else fade(mon.rev.g, mon.c, fx.reverb * 0.7);
+  buildEcho();
+  mon.out.gain.setTargetAtTime(fx.vol, mon.c.currentTime, 0.02);
 }
 
 let recorder = null;
@@ -135,30 +167,26 @@ export const mic = {
     }).then((s) => {
       if (token !== monToken || mon) { s.getTracks().forEach((t) => t.stop()); c.close(); return null; }
       const input = c.createMediaStreamSource(s);
-      const out = c.createGain(); out.gain.value = monVol;
+      const out = c.createGain(); out.gain.value = fx.vol;
       input.connect(out);              // voz seca: caminho mais curto possível
       out.connect(c.destination);
       if (c.state === 'suspended') c.resume();
       const latency = (c.baseLatency || 0) + (c.outputLatency || 0);
-      mon = { s, c, input, out, fx: [], latency };
-      applyEffect();
+      mon = { s, c, input, out, rev: null, echo: null, latency };
+      applyFx();
       return latency;
     }).catch(() => { try { c.close(); } catch (e) { /* ok */ } return null; }); // sem permissão: só não toca
   },
 
-  get effect() { return effect; },
-  setEffect(name) {
-    if (!EFFECTS[name]) return;
-    effect = name;
-    localStorage.setItem('ic-fx', name);
-    applyEffect();
-  },
-
-  get monitorVolume() { return monVol; },
-  setMonitorVolume(v) {
-    monVol = Math.min(1.5, Math.max(0, v));
-    localStorage.setItem('ic-mon-vol', String(monVol));
-    if (mon) mon.out.gain.setTargetAtTime(monVol, mon.c.currentTime, 0.02);
+  /** Efeitos do retorno: { reverb, room, echo, vol } */
+  get fx() { return { ...fx }; },
+  setFx(change) {
+    if ('reverb' in change) fx.reverb = clamp(+change.reverb, 0, 1);
+    if ('room' in change) fx.room = clamp(+change.room, 0, 1);
+    if ('echo' in change) fx.echo = !!change.echo;
+    if ('vol' in change) fx.vol = clamp(+change.vol, 0, 1.5);
+    saveFx();
+    applyFx();
   },
 
   /** Começa a gravar a voz (pra ouvir no final). */

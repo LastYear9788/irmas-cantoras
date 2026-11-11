@@ -1,11 +1,11 @@
 // Irmãs Cantoras — fluxo do app (telas, lobby, jogo, resultado)
-import { net } from './net.js?v=16';
-import * as yt from './youtube.js?v=16';
-import { findLyrics } from './lyrics.js?v=16';
-import { assignParts, ALL } from './parts.js?v=16';
-import { mic, EFFECTS } from './mic.js?v=16';
-import { Scorer } from './score.js?v=16';
-import { cam } from './cam.js?v=16';
+import { net } from './net.js?v=17';
+import * as yt from './youtube.js?v=17';
+import { findLyrics } from './lyrics.js?v=17';
+import { assignParts, ALL } from './parts.js?v=17';
+import { mic, roomLabel } from './mic.js?v=17';
+import { Scorer } from './score.js?v=17';
+import { cam } from './cam.js?v=17';
 
 const COLORS = ['#ff5fa2', '#4fb3ff', '#ffd166', '#7cf29a'];
 const ALL_COLOR = '#b388ff';
@@ -843,7 +843,8 @@ let warnedSlow = false;
 function renderHear() {
   $('btn-hear').textContent = hearMe ? '🎧 Me ouvindo' : '🎧 Me ouvir';
   $('btn-hear').classList.toggle('is-on', hearMe);
-  $('fx-pill').classList.toggle('hidden', !hearMe);
+  $('btn-fx').classList.toggle('hidden', !hearMe);
+  if (!hearMe) $('fx-panel').classList.add('hidden');
 }
 // liga o retorno e avisa se o fone/PC estiver atrasando a voz (fone bluetooth costuma passar de 0,15s)
 function startHear() {
@@ -861,15 +862,30 @@ $('btn-hear').onclick = () => {
   renderHear();
   toast(hearMe ? 'Agora você escuta sua voz 🎧 Só use com fone de ouvido, senão dá microfonia!' : 'Não está mais escutando sua voz', 4500);
 };
-Object.entries(EFFECTS).forEach(([key, fx]) => {
-  const o = document.createElement('option');
-  o.value = key; o.textContent = fx.label;
-  $('fx-select').appendChild(o);
-});
-$('fx-select').value = mic.effect;
-$('fx-select').onchange = (e) => mic.setEffect(e.target.value);
-$('mon-vol').value = Math.round(mic.monitorVolume * 100);
-$('mon-vol').oninput = (e) => mic.setMonitorVolume(e.target.value / 100);
+function renderFx() {
+  const f = mic.fx;
+  $('fx-reverb').value = Math.round(f.reverb * 100);
+  $('fx-reverb-val').textContent = f.reverb ? Math.round(f.reverb * 100) + '%' : 'desligado';
+  $('fx-room').value = Math.round(f.room * 100);
+  $('fx-room-val').textContent = roomLabel(f.room);
+  $('fx-echo').checked = f.echo;
+  $('fx-vol').value = Math.round(f.vol * 100);
+  $('fx-vol-val').textContent = Math.round(f.vol * 100) + '%';
+}
+$('btn-fx').onclick = (e) => { e.stopPropagation(); $('fx-panel').classList.toggle('hidden'); };
+$('fx-panel').onclick = (e) => e.stopPropagation();
+document.addEventListener('click', () => $('fx-panel').classList.add('hidden'));
+$('fx-reverb').oninput = (e) => { mic.setFx({ reverb: e.target.value / 100 }); renderFx(); };
+// tamanho da sala: o nome atualiza na hora, o som troca quando para de arrastar (ou a cada 0,15 s)
+let roomTimer = null;
+$('fx-room').oninput = (e) => {
+  $('fx-room-val').textContent = roomLabel(e.target.value / 100);
+  clearTimeout(roomTimer);
+  roomTimer = setTimeout(() => mic.setFx({ room: e.target.value / 100 }), 150);
+};
+$('fx-echo').onchange = (e) => mic.setFx({ echo: e.target.checked });
+$('fx-vol').oninput = (e) => { mic.setFx({ vol: e.target.value / 100 }); renderFx(); };
+renderFx();
 renderHear();
 
 /* ---------- gravação: ouvir a música inteira depois ---------- */
