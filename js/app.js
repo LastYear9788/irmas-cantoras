@@ -1,11 +1,11 @@
 // Irmãs Cantoras — fluxo do app (telas, lobby, jogo, resultado)
-import { net } from './net.js?v=15';
-import * as yt from './youtube.js?v=15';
-import { findLyrics } from './lyrics.js?v=15';
-import { assignParts, ALL } from './parts.js?v=15';
-import { mic } from './mic.js?v=15';
-import { Scorer } from './score.js?v=15';
-import { cam } from './cam.js?v=15';
+import { net } from './net.js?v=16';
+import * as yt from './youtube.js?v=16';
+import { findLyrics } from './lyrics.js?v=16';
+import { assignParts, ALL } from './parts.js?v=16';
+import { mic, EFFECTS } from './mic.js?v=16';
+import { Scorer } from './score.js?v=16';
+import { cam } from './cam.js?v=16';
 
 const COLORS = ['#ff5fa2', '#4fb3ff', '#ffd166', '#7cf29a'];
 const ALL_COLOR = '#b388ff';
@@ -562,7 +562,7 @@ net.on('start', async (msg) => {
   state.photos = Object.create(null);
   renderPhotos();
   clearRecording();
-  if (myIndex >= 0) mic.monitor(hearMe);
+  if (myIndex >= 0) { if (hearMe) startHear(); else mic.monitor(false); }
 
   $('tap-overlay').classList.add('hidden');
   renderScoreboard();
@@ -839,18 +839,37 @@ renderMute();
 
 /* ---------- me ouvir (voz no fone enquanto canta) ---------- */
 let hearMe = localStorage.getItem('ic-hear') === '1';
+let warnedSlow = false;
 function renderHear() {
   $('btn-hear').textContent = hearMe ? '🎧 Me ouvindo' : '🎧 Me ouvir';
   $('btn-hear').classList.toggle('is-on', hearMe);
+  $('fx-pill').classList.toggle('hidden', !hearMe);
+}
+// liga o retorno e avisa se o fone/PC estiver atrasando a voz (fone bluetooth costuma passar de 0,15s)
+function startHear() {
+  mic.monitor(true).then((lat) => {
+    if (lat == null || warnedSlow || lat < 0.08) return;
+    warnedSlow = true;
+    toast(`Sua voz está chegando com ${Math.round(lat * 1000)} ms de atraso. Isso costuma ser fone Bluetooth: com fone com fio fica instantâneo 🎧`, 8000);
+  });
 }
 $('btn-hear').onclick = () => {
   hearMe = !hearMe;
   localStorage.setItem('ic-hear', hearMe ? '1' : '0');
   const g = state.game;
-  if (g && !g.finished && g.myIndex >= 0) mic.monitor(hearMe);
+  if (g && !g.finished && g.myIndex >= 0) { if (hearMe) startHear(); else mic.monitor(false); }
   renderHear();
   toast(hearMe ? 'Agora você escuta sua voz 🎧 Só use com fone de ouvido, senão dá microfonia!' : 'Não está mais escutando sua voz', 4500);
 };
+Object.entries(EFFECTS).forEach(([key, fx]) => {
+  const o = document.createElement('option');
+  o.value = key; o.textContent = fx.label;
+  $('fx-select').appendChild(o);
+});
+$('fx-select').value = mic.effect;
+$('fx-select').onchange = (e) => mic.setEffect(e.target.value);
+$('mon-vol').value = Math.round(mic.monitorVolume * 100);
+$('mon-vol').oninput = (e) => mic.setMonitorVolume(e.target.value / 100);
 renderHear();
 
 /* ---------- gravação: ouvir a música inteira depois ---------- */

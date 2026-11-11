@@ -5,11 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Irmãs Cantoras</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎤</text></svg>">
-  <link rel="stylesheet" href="css/glass.css?v=15">
+  <link rel="stylesheet" href="css/glass.css?v=16">
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <script>document.documentElement.classList.toggle('theme-new', localStorage.getItem('ic-theme') !== 'classic');</script>
-  <script type="module" src="js/app.js?v=15"></script>
-  <script type="module" src="js/theme.js?v=15"></script>
+  <script type="module" src="js/app.js?v=16"></script>
+  <script type="module" src="js/theme.js?v=16"></script>
 </head>
 <body>
   <!-- Fundo animado (é o que dá vida ao vidro) -->
@@ -178,6 +178,11 @@
           <button id="btn-sync-plus" class="mini" title="Letra adiantada? Clique aqui">+</button>
         </div>
         <button id="btn-hear" class="btn btn-small" title="Escutar sua própria voz no fone enquanto canta">🎧 Me ouvir</button>
+        <div id="fx-pill" class="glass pill fx-pill hidden" title="Efeito e volume da sua voz no fone">
+          <span>✨</span>
+          <select id="fx-select" aria-label="Efeito na voz"></select>
+          <input id="mon-vol" type="range" min="0" max="150" step="5" aria-label="Volume da sua voz no fone">
+        </div>
         <button id="btn-mute" class="btn btn-small" title="Cantar sem a música (só no seu PC)">🔊 Música ligada</button>
         <button id="btn-end" class="btn btn-small">Encerrar</button>
       </div>
