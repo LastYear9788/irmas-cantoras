@@ -1,12 +1,12 @@
 // Irmãs Cantoras — fluxo do app (telas, lobby, jogo, resultado)
-import { net } from './net.js?v=18';
-import * as yt from './youtube.js?v=18';
-import { findLyrics } from './lyrics.js?v=18';
-import { assignParts, ALL } from './parts.js?v=18';
-import { mic, roomLabel } from './mic.js?v=18';
-import { Scorer } from './score.js?v=18';
-import { cam } from './cam.js?v=18';
-import { anim } from './anim.js?v=18';
+import { net } from './net.js?v=19';
+import * as yt from './youtube.js?v=19';
+import { findLyrics } from './lyrics.js?v=19';
+import { assignParts, ALL } from './parts.js?v=19';
+import { mic, roomLabel } from './mic.js?v=19';
+import { Scorer } from './score.js?v=19';
+import { cam } from './cam.js?v=19';
+import { anim } from './anim.js?v=19';
 
 const COLORS = ['#ff5fa2', '#4fb3ff', '#ffd166', '#7cf29a'];
 const ALL_COLOR = '#b388ff';
@@ -874,7 +874,12 @@ $('btn-hear').onclick = () => {
   renderHear();
   toast(hearMe ? 'Agora você escuta sua voz 🎧 Só use com fone de ouvido, senão dá microfonia!' : 'Não está mais escutando sua voz', 4500);
 };
+function renderLatency() {
+  const lat = mic.monitorLatency;
+  $('fx-lat').textContent = lat == null ? '' : `⏱️ Atraso medido pelo navegador: ${Math.round(lat * 1000)} ms`;
+}
 function renderFx() {
+  renderLatency();
   const f = mic.fx;
   $('fx-reverb').value = Math.round(f.reverb * 100);
   $('fx-reverb-val').textContent = f.reverb ? Math.round(f.reverb * 100) + '%' : 'desligado';
@@ -884,7 +889,7 @@ function renderFx() {
   $('fx-vol').value = Math.round(f.vol * 100);
   $('fx-vol-val').textContent = Math.round(f.vol * 100) + '%';
 }
-$('btn-fx').onclick = (e) => { e.stopPropagation(); anim.press($('btn-fx')); anim.panel($('fx-panel'), $('fx-panel').classList.contains('hidden')); };
+$('btn-fx').onclick = (e) => { e.stopPropagation(); renderLatency(); anim.press($('btn-fx')); anim.panel($('fx-panel'), $('fx-panel').classList.contains('hidden')); };
 $('fx-panel').onclick = (e) => e.stopPropagation();
 document.addEventListener('click', () => anim.panel($('fx-panel'), false));
 $('fx-reverb').oninput = (e) => {

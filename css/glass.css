@@ -454,6 +454,7 @@ body.playing .theme-btn { display: none; }
 .fx-panel label b { font-weight: 600; opacity: 0.8; white-space: nowrap; }
 .fx-panel .fx-check { flex-direction: row; align-items: center; gap: 8px; cursor: pointer; }
 .fx-panel input[type=range] { width: 100%; accent-color: #7cf29a; cursor: pointer; }
+.fx-panel .fx-lat { margin: 0; font-size: 12px; opacity: 0.75; }
 .fx-panel input[type=checkbox] { accent-color: #7cf29a; width: 16px; height: 16px; }
 
 /* ---------- animações (GSAP) ---------- */

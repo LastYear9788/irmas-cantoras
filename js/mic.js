@@ -171,8 +171,12 @@ export const mic = {
       input.connect(out);              // voz seca: caminho mais curto possível
       out.connect(c.destination);
       if (c.state === 'suspended') c.resume();
-      const latency = (c.baseLatency || 0) + (c.outputLatency || 0);
+      // atraso = entrada (microfone) + processamento + saída (fone); o navegador nem sempre sabe o da entrada
+      const st = s.getAudioTracks()[0]?.getSettings?.() || {};
+      const latency = (st.latency || 0) + (c.baseLatency || 0) + (c.outputLatency || 0);
       mon = { s, c, input, out, rev: null, echo: null, latency };
+      // a saída às vezes só é conhecida depois que o som começa a tocar
+      setTimeout(() => { if (mon && mon.c === c) mon.latency = (st.latency || 0) + (c.baseLatency || 0) + (c.outputLatency || 0); }, 600);
       applyFx();
       return latency;
     }).catch(() => { try { c.close(); } catch (e) { /* ok */ } return null; }); // sem permissão: só não toca
@@ -180,6 +184,8 @@ export const mic = {
 
   /** Efeitos do retorno: { reverb, room, echo, vol } */
   get fx() { return { ...fx }; },
+  /** atraso estimado do retorno, em segundos (ou null se desligado) */
+  get monitorLatency() { return mon ? mon.latency : null; },
   setFx(change) {
     if ('reverb' in change) fx.reverb = clamp(+change.reverb, 0, 1);
     if ('room' in change) fx.room = clamp(+change.room, 0, 1);

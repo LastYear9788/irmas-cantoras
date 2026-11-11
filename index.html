@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Irmãs Cantoras</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎤</text></svg>">
-  <link rel="stylesheet" href="css/glass.css?v=18">
+  <link rel="stylesheet" href="css/glass.css?v=19">
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <script>document.documentElement.classList.toggle('theme-new', localStorage.getItem('ic-theme') !== 'classic');</script>
   <script src="js/vendor/gsap.min.js" defer></script>
-  <script type="module" src="js/app.js?v=18"></script>
-  <script type="module" src="js/theme.js?v=18"></script>
+  <script type="module" src="js/app.js?v=19"></script>
+  <script type="module" src="js/theme.js?v=19"></script>
 </head>
 <body>
   <!-- Fundo animado (é o que dá vida ao vidro) -->
@@ -187,6 +187,7 @@
             <label><span class="fx-row">Tamanho da sala <b id="fx-room-val"></b></span>
               <input id="fx-room" type="range" min="0" max="100" step="1"></label>
             <label class="fx-check"><input id="fx-echo" type="checkbox"> Eco</label>
+            <p id="fx-lat" class="fx-lat"></p>
             <label><span class="fx-row">Volume da sua voz <b id="fx-vol-val"></b></span>
               <input id="fx-vol" type="range" min="0" max="150" step="5"></label>
           </div>
