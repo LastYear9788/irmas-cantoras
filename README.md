@@ -29,11 +29,15 @@ Pronto. O app acha a letra sozinho, divide quem canta o quê e dá a nota no fin
 - **Juntas**: todas cantam tudo ao mesmo tempo.
 
 ### Como é a nota (0 a 10.000)
-- **Presença (40%)**: cantou na hora que era pra cantar.
-- **Afinação (40%)**: voz afinada e firme.
-- **Ritmo (20%)**: entrou na hora certa.
+Cada linha da sua vez vale uma parte da nota:
+- **💨 Fôlego**: quanto da linha você cantou. Respirar entre as sílabas e no fim da frase não tira ponto. Ele multiplica o resto: cantar metade da linha, mesmo perfeito, vale metade.
+- **🎯 Afinação (43%)**: as notas certinhas, dentro do tom da música, e a melodia se mexendo. Vibrato não conta como erro, e música gravada fora do "lá 440" não prejudica quem canta junto.
+- **🎙️ Timbre (27%)**: voz limpa e firme (vibrato pode; tremedeira não).
+- **⏱️ Ritmo (30%)**: entrar na hora certa e cantar as sílabas da letra (só "aaaa" numa nota não vale). Fone bluetooth ganha uma tolerância a mais, porque ele atrasa o som.
 
-> A nota não compara com a voz do cantor original (não existe fonte grátis da melodia). Ela mede se você cantou na hora certa, afinada e firme.
+Durante a música, cada linha que termina ganha uma avaliação (✨ Perfeito, 🔥 Ótimo, 👍 Bom…) com os pontos, e embaixo da letra aparece se a nota está contando ou o que está atrapalhando (microfone mudo, voz baixa, vídeo carregando…).
+
+> A nota não compara com a voz do cantor original (não existe fonte grátis da melodia). Ela mede se você cantou a letra na hora certa, afinada e firme.
 
 ## Por dentro (pra quem for mexer)
 Site estático, sem build: HTML + CSS + JavaScript puro.
@@ -41,7 +45,8 @@ Site estático, sem build: HTML + CSS + JavaScript puro.
 - `js/youtube.js`: player do YouTube.
 - `js/lyrics.js`: letra sincronizada. Tenta em ordem: [LRCLIB](https://lrclib.net), Deezer (bom pra música brasileira) e NetEase (bom pra internacional). Deezer e NetEase passam pelo nosso intermediário na Cloudflare (`proxy/worker.js`, plano grátis), com `cors.eu.org` e `allorigins` de reserva. Pra republicar o intermediário: `cd proxy && npx wrangler deploy`. Sempre confere se o nome da música bate com o título do vídeo.
 - `js/parts.js`: quem canta cada linha.
-- `js/mic.js` / `js/score.js`: microfone, afinação e nota.
+- `js/mic.js` / `js/pitch.js` / `js/score.js`: microfone, detector de afinação e nota.
+- `tests/run.mjs`: testes automáticos da nota e do detector (`node tests/run.mjs`).
 - `js/app.js`: telas e fluxo.
 
 Rodar no PC: `python -m http.server 8000` nesta pasta e abrir `http://localhost:8000`.

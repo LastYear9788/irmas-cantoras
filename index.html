@@ -5,11 +5,18 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Irmãs Cantoras</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎤</text></svg>">
-  <link rel="stylesheet" href="css/glass.css?v=15">
+  <link rel="stylesheet" href="css/glass.css?v=17">
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
-  <script>document.documentElement.classList.toggle('theme-new', localStorage.getItem('ic-theme') !== 'classic');</script>
-  <script type="module" src="js/app.js?v=15"></script>
-  <script type="module" src="js/theme.js?v=15"></script>
+  <script>
+    document.documentElement.classList.toggle('theme-new', localStorage.getItem('ic-theme') !== 'classic');
+    // PC fraco (poucos núcleos/memória, ou já pesou antes): começa no modo leve
+    try {
+      if (localStorage.getItem('ic-lite') === '1' || (navigator.hardwareConcurrency || 4) <= 2 || (navigator.deviceMemory && navigator.deviceMemory <= 2))
+        document.documentElement.classList.add('lite');
+    } catch (e) { /* ok */ }
+  </script>
+  <script type="module" src="js/app.js?v=17"></script>
+  <script type="module" src="js/theme.js?v=17"></script>
 </head>
 <body>
   <!-- Fundo animado (é o que dá vida ao vidro) -->
@@ -144,10 +151,10 @@
       </div>
       <p class="score-foot">
         🏆 A nota vai de 0 a 10.000 e soma
-        <span class="tip-word" data-tip="Cantar a linha inteira, sem parar no meio">💨 Fôlego</span> ·
-        <span class="tip-word" data-tip="Se a nota que você canta está certinha">🎯 Afinação</span> ·
+        <span class="tip-word" data-tip="Cantar a linha inteira (respirar entre as frases pode!)">💨 Fôlego</span> ·
+        <span class="tip-word" data-tip="Notas certinhas e no tom da música (vibrato não atrapalha)">🎯 Afinação</span> ·
         <span class="tip-word" data-tip="Voz limpa e firme, sem tremer">🎙️ Timbre</span> ·
-        <span class="tip-word" data-tip="Começar a cantar na hora certa">⏱️ Ritmo</span>
+        <span class="tip-word" data-tip="Entrar na hora certa e cantar as sílabas da letra (não vale só “aaaa”)">⏱️ Ritmo</span>
       </p>
     </section>
 
@@ -164,7 +171,9 @@
           <div id="ly-prev" class="ly-line ly-prev"></div>
           <div id="ly-cur" class="ly-line ly-cur"></div>
           <div id="ly-next" class="ly-line ly-next"></div>
+          <div id="line-rate" class="line-rate" aria-live="polite"></div>
         </div>
+        <button id="score-status" class="score-status glass hidden" role="status" aria-live="polite"></button>
       </div>
 
       <div class="game-bottom">
@@ -204,6 +213,7 @@
         <h2 id="result-title" class="title small">Resultado</h2>
         <div id="result-list" class="result-list"></div>
         <p id="result-wait" class="hint center"></p>
+        <p id="result-tip" class="result-tip hidden"></p>
         <div id="rec-box" class="rec-box hidden">
           <button id="btn-rec-play" class="btn btn-primary">🎧 Ouvir minha gravação</button>
           <a id="rec-download" class="link" download>💾 Guardar no PC</a>

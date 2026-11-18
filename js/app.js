@@ -1,11 +1,11 @@
 // Irmãs Cantoras — fluxo do app (telas, lobby, jogo, resultado)
-import { net } from './net.js?v=15';
-import * as yt from './youtube.js?v=15';
-import { findLyrics } from './lyrics.js?v=15';
-import { assignParts, ALL } from './parts.js?v=15';
-import { mic } from './mic.js?v=15';
-import { Scorer } from './score.js?v=15';
-import { cam } from './cam.js?v=15';
+import { net } from './net.js?v=17';
+import * as yt from './youtube.js?v=17';
+import { findLyrics } from './lyrics.js?v=17';
+import { assignParts, ALL } from './parts.js?v=17';
+import { mic } from './mic.js?v=17';
+import { Scorer } from './score.js?v=17';
+import { cam } from './cam.js?v=17';
 
 const COLORS = ['#ff5fa2', '#4fb3ff', '#ffd166', '#7cf29a'];
 const ALL_COLOR = '#b388ff';
@@ -239,7 +239,11 @@ async function startMic() {
     $('btn-mic').classList.add('is-on');
     $('btn-mic').disabled = true;
     $('mic-msg').textContent = 'Fale alguma coisa: a barra tem que mexer. Use fone de ouvido! 🎧';
+    $('mic-msg').style.color = '';
     meterLoop();
+    // religou no meio da música (o fio tinha soltado): volta a ouvir e a contar
+    const g = state.game;
+    if (g && !g.finished && g.myIndex >= 0) mic.monitor(hearMe);
     return true;
   } catch (e) {
     $('mic-msg').textContent = e.message;
@@ -554,8 +558,10 @@ net.on('start', async (msg) => {
   const lines = state.song.lines;
   state.game = {
     round: msg.round, at: msg.at, who: msg.who, players: msg.players, myIndex,
-    lines, scorer: new Scorer(lines, msg.who, myIndex),
+    lines, scorer: new Scorer(lines, msg.who, myIndex, { latency: /bluetooth|hands-?free|headset|airpods|buds|bt/i.test(mic.label()) ? 0.25 : 0 }),
+    prevActive: -1,
     shift: 0, finished: false, started: false, lastLiveSent: 0,
+    diag: newDiag(),
     shots: cam.active ? planShots(lines, msg.who, myIndex) : null,
     myPhotos: [], peakPhoto: null, peak: 0, lastPeakShot: 0,
   };
@@ -566,6 +572,8 @@ net.on('start', async (msg) => {
 
   $('tap-overlay').classList.add('hidden');
   renderScoreboard();
+  setStatus(null);
+  $('line-rate').classList.remove('show');
   bannerKey = '';
   lastRendered = '';
   setLyrics(-1, -1);
@@ -579,6 +587,7 @@ net.on('start', async (msg) => {
   }
   countdown(msg.round);
   gameLoop(msg.round);
+  scoreLoop(msg.round);
 });
 
 function countdown(round) {
@@ -623,15 +632,43 @@ function heartbeat(round) {
   }, 1000);
 }
 
+/**
+ * Antes: se o vídeo estivesse 0,5s fora do tempo, pulava pro lugar certo — toda vez.
+ * Em PC fraco / internet lenta, cada pulo faz o vídeo carregar de novo, e quando volta já
+ * está atrasado de novo → pula de novo… o vídeo ficava travando e a nota não subia
+ * (só conta ponto com a música andando). Agora: tolerância maior, espera entre pulos,
+ * mira um pouco à frente (o tempo que o PC leva pra carregar) e, se continuar brigando, desiste.
+ * Sozinha na sala não tem com quem sincronizar: não pula nunca.
+ */
 function syncVideo(g) {
   if (!g.started || g.finished) return;
   const expected = (net.hostNow() - g.at) / 1000;   // onde o vídeo deveria estar
   if (expected < 0 || expected > yt.duration()) return;
   const st = yt.state();
   if (st === 1) g.sawPlaying = true;
-  if (st === 3) return;                              // carregando: espera
-  if (Math.abs(yt.time() - expected) > 0.5) yt.seek(expected);
-  if (st !== 1 && $('tap-overlay').classList.contains('hidden')) yt.play();
+  if (st === 3 || st === 0) return;                  // carregando: espera / terminou: não recomeça
+  const sy = g.sync || (g.sync = { lastSeek: -1e9, lead: 0.25, seeks: [], tol: 1, warned: false });
+  const now = performance.now();
+  const drift = yt.time() - expected;
+  if (st === 1) {
+    if (g.players.length < 2 || Math.abs(drift) <= sy.tol || now - sy.lastSeek < 6000) return;
+    // o último pulo caiu atrás de novo? o PC demora pra carregar: mira mais à frente
+    if (drift < 0 && now - sy.lastSeek < 20000) sy.lead = Math.min(3, sy.lead + Math.min(1.5, -drift));
+    sy.seeks = sy.seeks.filter((t) => now - t < 90000);
+    sy.seeks.push(now);
+    if (sy.seeks.length >= 4) {
+      sy.tol = Math.min(4, sy.tol * 1.8);
+      if (!sy.warned) { sy.warned = true; toast('Seu PC/internet está lento pro vídeo: ele pode ficar um pouquinho fora do tempo das outras. A nota continua valendo 🙂', 6000); }
+    }
+    sy.lastSeek = now;
+    yt.seek(expected + (drift < 0 ? sy.lead : 0));
+    return;
+  }
+  // parado (não foi a pessoa que pausou: não tem botão de pausa): volta a tocar
+  if ($('tap-overlay').classList.contains('hidden')) {
+    if (Math.abs(drift) > sy.tol) yt.seek(expected + sy.lead);
+    yt.play();
+  }
 }
 
 function checkEnd(g) {
@@ -653,39 +690,217 @@ $('btn-tap').onclick = () => {
   yt.play();
 };
 
-function gameLoop(round) {
-  const g = state.game;
-  if (!g || g.round !== round || g.finished) return;
-  requestAnimationFrame(() => gameLoop(round));
-  if (!g.started) return;
-
+/** onde a música está: tempo da letra, última linha que começou (k) e linha tocando agora (ou -1) */
+function lyricPos(g) {
   const lt = yt.time() - g.shift;          // tempo "da letra"
   const lines = g.lines;
-
-  // linha atual = última que já começou
   let k = -1;
   for (let i = 0; i < lines.length; i++) { if (lines[i].t <= lt) k = i; else break; }
   const active = k >= 0 && lt < lines[k].end ? k : -1;
-  g.active = active;
+  return { lt, k, active };
+}
 
-  const m = mic.read();
-  if (yt.isPlaying()) { g.sawPlaying = true; g.scorer.frame(active, lt, m); cameraFrame(g, active, lt, m); }
+/** Desenho da tela (letra, faixa da vez): só quando a tela está sendo mostrada. */
+function gameLoop(round) {
+  const g = state.game;
+  if (!g || g.round !== round || g.finished) return;
+  requestAnimationFrame((now) => { watchFps(now); gameLoop(round); });
+  if (!g.started) return;
 
+  const { lt, k, active } = lyricPos(g);
+  const lines = g.lines;
   if (active >= 0) setLyrics(active, k, (lt - lines[active].t) / (lines[active].end - lines[active].t));
   else setLyrics(-1, k);
   updateBanner(active, k, lt);
+  checkEnd(g);   // fim: vídeo acabou, ou 6s depois da última linha
+}
 
-  // pontuação ao vivo
-  const now = performance.now();
-  if (now - g.lastLiveSent > 1000) {
-    g.lastLiveSent = now;
-    const score = g.scorer.live();
-    state.live[net.myId] = score;
-    updateScores(active);
-    if (g.myIndex >= 0) net.broadcast({ type: 'live', round: g.round, score });
+/**
+ * Pontuação: num relógio próprio (25x por segundo), separado do desenho.
+ * Antes ela ia junto com o desenho da tela: PC fraco desenhando poucos quadros contava
+ * menos, e com a janela minimizada ou coberta por outra (Discord, WhatsApp…) não contava NADA.
+ */
+function scoreLoop(round) {
+  let lastT = 0;
+  const iv = setInterval(() => {
+    const g = state.game;
+    if (!g || g.round !== round || g.finished) return clearInterval(iv);
+    if (!g.started) return;
+    const now = performance.now();
+    const dt = lastT ? (now - lastT) / 1000 : 0;
+    lastT = now;
+
+    const { lt, active } = lyricPos(g);
+    g.active = active;
+    const m = mic.read();
+    const playing = yt.isPlaying();
+    if (playing) { g.sawPlaying = true; g.scorer.frame(active, lt, m, dt); cameraFrame(g, active, lt, m); }
+    if (g.myIndex >= 0) diagnose(g, active, lt, m, playing, dt);
+    if (active !== g.prevActive) {
+      if (g.prevActive >= 0 && g.myIndex >= 0) rateLine(g, g.prevActive);
+      g.prevActive = active;
+    }
+
+    // pontuação ao vivo
+    if (now - g.lastLiveSent > 1000) {
+      g.lastLiveSent = now;
+      const score = g.scorer.live();
+      state.live[net.myId] = score;
+      updateScores(active);
+      if (g.myIndex >= 0) net.broadcast({ type: 'live', round: g.round, score });
+    }
+  }, 40);
+}
+
+/* ---------- aviso ao vivo: por que a nota não está subindo ---------- */
+function newDiag() {
+  return { voicedAvg: 0, loudAvg: 0, clipAvg: 0, inLine: 0, outVoiced: 0, notPlaying: 0, why: Object.create(null), mineTime: 0, cand: null, candSince: 0, shown: '' };
+}
+
+const STATUS = {
+  ok: ['ok', '✅ Contando pontos!'],
+  go: ['info', '🎤 Sua vez, canta!'],
+  off: ['bad', '🎤 O microfone desligou. Clique aqui pra ligar de novo'],
+  muted: ['bad', '🔇 O microfone está no mudo (no Windows, no botão do fone ou em outro programa). Tira do mudo pra contar pontos'],
+  silent: ['bad', '🔇 O microfone está mandando silêncio total. Confere o botão de mudo do fone/notebook ou se outro programa (Discord, Zoom…) pegou o microfone'],
+  suspended: ['bad', '🔈 O navegador pausou o áudio. Clique aqui pra voltar a contar pontos'],
+  buffering: ['warn', '⏳ O vídeo está carregando… os pontos voltam quando a música andar'],
+  quiet: ['warn', '🔉 Não estou ouvindo sua voz. Canta mais alto ou chega mais perto do microfone'],
+  noisy: ['warn', '🗣️ Estou ouvindo som, mas não uma nota cantada. Solta a voz nas vogais (sem sussurrar nem falar)'],
+  leak: ['warn', '🎧 Tem muito barulho no microfone (ou a música está vazando da caixa de som). Usa fone de ouvido'],
+  clip: ['warn', '📢 Alto demais: sua voz está estourando no microfone. Afasta um pouquinho'],
+  offbeat: ['info', '🎵 Você está cantando numa parte sem letra. Se a letra estiver atrasada ou adiantada, ajuste em "Letra" − / +'],
+  instrumental: ['info', '🎵 Parte sem letra: aqui não vale ponto'],
+  other: ['info', ''],   // texto montado na hora: "Agora é a vez de Bia…"
+};
+
+function diagnose(g, active, lt, m, playing, dt) {
+  const d = g.diag;
+  const a = 1 - Math.exp(-dt / 0.6);           // média dos últimos ~0,6s
+  d.voicedAvg += ((m.voiced ? 1 : 0) - d.voicedAvg) * a;
+  d.loudAvg += ((m.loud ? 1 : 0) - d.loudAvg) * a;
+  d.clipAvg += ((m.peak > 0.98 ? 1 : 0) - d.clipAvg) * a;
+  d.notPlaying = playing ? 0 : d.notPlaying + dt;
+  const mineNow = active >= 0 && isMine(g.who[active]);
+  // terminou de cantar a frase e está respirando antes da próxima: não é problema
+  const resting = mineNow && !m.voiced && lt > g.scorer.expectedEnd(active);
+  d.inLine = mineNow ? d.inLine + dt : 0;
+  d.outVoiced = active < 0 && m.voiced ? d.outVoiced + dt : active < 0 && !m.loud ? Math.max(0, d.outVoiced - dt * 0.5) : active >= 0 ? 0 : d.outVoiced;
+
+  const ms = mic.status();
+  let key = null;
+  if (ms.problem === 'off' || ms.problem === 'muted' || ms.problem === 'silent' || ms.problem === 'suspended') key = ms.problem;
+  else if (d.notPlaying > 1.2 && $('tap-overlay').classList.contains('hidden') && yt.state() !== 0) key = 'buffering';
+  else if (resting) key = d.shown === 'ok' ? 'ok' : null;
+  else if (mineNow) {
+    if (d.voicedAvg > 0.3) key = d.clipAvg > 0.4 ? 'clip' : 'ok';
+    else if (d.inLine < 1) key = 'go';
+    else if (d.clipAvg > 0.4) key = 'clip';
+    else if (d.loudAvg > 0.5) key = ms.floor > 0.02 ? 'leak' : 'noisy';
+    else key = 'quiet';
+  } else if (active < 0) {
+    if (d.outVoiced > 2.5) key = 'offbeat';
+    else if (d.loudAvg > 0.6 && m.voiced) key = 'instrumental';
+  } else if (d.loudAvg > 0.6 && d.voicedAvg > 0.3) key = 'other';
+
+  // guarda o motivo de não contar (pra dica no resultado)
+  if (mineNow && playing && !resting) {
+    d.mineTime += dt;
+    if (key && key !== 'ok' && key !== 'go' && key !== 'clip') d.why[key] = (d.why[key] || 0) + dt;
   }
 
-  checkEnd(g);   // fim: vídeo acabou, ou 6s depois da última linha
+  // só troca o aviso depois que ele se firmou (não fica piscando entre uma sílaba e outra)
+  const now = performance.now();
+  if (key !== d.cand) { d.cand = key; d.candSince = now; }
+  const wait = !key || key === 'ok' || key === 'go' ? 250 : key === 'buffering' || STATUS[key][0] === 'bad' ? 300 : 900;
+  if (now - d.candSince < wait || key === d.shown) return;
+  d.shown = key;
+  if (key === 'other') {
+    const w = g.who[active];
+    setStatus('other', `👀 Agora é a vez de ${(g.players[w] || {}).name || 'outra'}: seus pontos só contam na sua vez`);
+  } else setStatus(key);
+}
+
+function setStatus(key, text) {
+  const el = $('score-status');
+  if (!key) { el.classList.add('hidden'); el.dataset.key = ''; return; }
+  const [cls, msg] = STATUS[key];
+  el.className = 'score-status glass ' + cls;
+  el.textContent = text || msg;
+  el.dataset.key = key;
+}
+
+// clicar no aviso resolve o que dá pra resolver na hora
+$('score-status').onclick = async () => {
+  const key = $('score-status').dataset.key;
+  if (key === 'off') { if (await startMic()) toast('Microfone ligado de novo 🎤'); }
+  else if (key === 'suspended') mic.resume();
+};
+// o navegador pode pausar o áudio até a pessoa clicar em algo
+document.addEventListener('pointerdown', () => { if (mic.active) mic.resume(); }, { passive: true });
+
+/* ---------- avaliação de cada linha que termina: "Perfeito! +412" ---------- */
+let rateTimer = 0;
+function rateLine(g, i) {
+  const r = g.scorer.lineResult(i);
+  if (!r) return;
+  const v = r.v;
+  const [label, cls] = v >= 0.92 ? ['✨ PERFEITO!', 'perfect'] : v >= 0.8 ? ['🔥 Ótimo!', 'great'] : v >= 0.6 ? ['👍 Bom', 'good']
+    : v >= 0.35 ? ['🙂 Ok', 'ok'] : ['😬 Ops…', 'miss'];
+  // o que mais atrapalhou nessa linha (só quando não foi ótima)
+  let tip = '';
+  if (v < 0.8) {
+    const weak = [['presence', 'cantou pouco da linha'], ['tune', 'desafinou um pouco'], ['rhythm', 'entrou atrasada ou sem acompanhar as sílabas'], ['timbre', 'voz tremida ou fraquinha']]
+      .map(([k, t]) => [r[k], t]).sort((a, b) => a[0] - b[0])[0];
+    if (weak[0] < 0.7) tip = weak[1];
+  }
+  const el = $('line-rate');
+  el.className = 'line-rate ' + cls;
+  el.innerHTML = `<b>${label}</b> <span class="pts">+${r.points.toLocaleString('pt-BR')}</span>${tip ? `<small>${esc(tip)}</small>` : ''}`;
+  void el.offsetWidth;
+  el.classList.add('show');
+  clearTimeout(rateTimer);
+  rateTimer = setTimeout(() => el.classList.remove('show'), 1800);
+}
+
+/** No resultado: se boa parte da vez a voz não contou, explica o porquê */
+function resultTip(g) {
+  const d = g && g.diag;
+  if (!d || g.myIndex < 0 || d.mineTime < 5) return '';
+  let top = null;
+  for (const k in d.why) if (!top || d.why[k] > d.why[top]) top = k;
+  if (!top || d.why[top] < Math.max(4, d.mineTime * 0.25)) return '';
+  const pct = Math.round((d.why[top] / d.mineTime) * 100);
+  const tips = {
+    off: 'o microfone estava desligado',
+    muted: 'o microfone estava no mudo',
+    silent: 'o microfone estava mandando silêncio (mudo no fone/notebook ou outro programa usando)',
+    suspended: 'o navegador tinha pausado o áudio',
+    buffering: 'o vídeo estava carregando (internet ou PC lento)',
+    quiet: 'não deu pra ouvir sua voz (canta mais alto ou chega perto do microfone)',
+    noisy: 'o microfone ouviu som, mas não nota cantada (fala, sussurro ou barulho)',
+    leak: 'tinha muito barulho no microfone (use fone de ouvido)',
+  };
+  return tips[top] ? `💡 Em ${pct}% da sua vez a nota não contou porque ${tips[top]}.` : '';
+}
+
+/* ---------- PC fraco: se a tela estiver desenhando devagar, liga o modo leve ---------- */
+let fpsStart = 0, fpsSum = 0, fpsN = 0, fpsLast = 0;
+function watchFps(now) {
+  if (document.documentElement.classList.contains('lite')) return;
+  const gap = fpsLast ? now - fpsLast : 0;
+  fpsLast = now;
+  if (!gap || gap > 400 || document.hidden) return;        // aba escondida / travadinha isolada não conta
+  if (!fpsStart) fpsStart = now;
+  fpsSum += gap; fpsN++;
+  if (now - fpsStart < 3000) return;
+  const slow = fpsSum / fpsN > 45;                          // menos de ~22 quadros por segundo
+  fpsStart = 0; fpsSum = 0; fpsN = 0;
+  if (!slow) return;
+  document.documentElement.classList.add('lite');
+  try { localStorage.setItem('ic-lite', '1'); } catch (e) { /* ok */ }
+  window.dispatchEvent(new Event('ic-lite'));
+  toast('Seu PC estava pesando: liguei o modo leve (menos efeitos, mesma diversão) ⚡', 5000);
 }
 
 let lastRendered = '';
@@ -800,6 +1015,7 @@ function renderScoreboard() {
       <span class="pname">${esc(p.name)}${p.id === net.myId ? ' <span class="hint">(você)</span>' : ''}</span>
       <span class="pscore" id="pscore-${i}">0</span>
     </div>`).join('');
+  updateScores(g.active ?? -1);   // redesenhou (alguém saiu, mudou "pronta"…): não volta pra 0
 }
 
 function updateScores(active) {
@@ -939,7 +1155,12 @@ function finishRound() {
   document.body.classList.remove('playing');
   $('countdown').classList.add('hidden');
   $('tap-overlay').classList.add('hidden');
+  setStatus(null);
+  $('line-rate').classList.remove('show');
   setShift(-g.shift); // zera pro próximo
+  const tip = resultTip(g);
+  $('result-tip').textContent = tip;
+  $('result-tip').classList.toggle('hidden', !tip);
 
   if (g.myIndex >= 0) {
     const result = g.scorer.final();
@@ -957,7 +1178,7 @@ net.on('final', (msg) => {
   const r = msg.result || {};
   state.finals[msg.from] = {
     total: num(r.total, 10000), presence: num(r.presence, 100), tune: num(r.tune, 100),
-    timbre: num(r.timbre, 100), rhythm: num(r.rhythm, 100),
+    timbre: num(r.timbre, 100), rhythm: num(r.rhythm, 100), perfect: num(r.perfect, 999),
   };
   if (state.game.finished) renderResults();
 });
@@ -1007,7 +1228,7 @@ function renderResults() {
         <span class="pname">${esc(x.name)}${x.id === net.myId ? ' <span class="hint">(você)</span>' : ''}</span>
         <span class="ptotal">${x.r.total.toLocaleString('pt-BR')}</span>
       </div>
-      <div class="result-phrase">${phraseFor(x.r.total)}</div>
+      <div class="result-phrase">${phraseFor(x.r.total)}${x.r.perfect ? ` · ✨ ${x.r.perfect} ${x.r.perfect === 1 ? 'linha perfeita' : 'linhas perfeitas'}` : ''}</div>
       ${medals[x.id] ? `<span class="medal">${medals[x.id]}</span>` : ''}
       <div class="bars">
         ${bar('💨 Fôlego', x.r.presence)}

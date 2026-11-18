@@ -35,11 +35,15 @@ async function getPlayer() {
       width: '1280', height: '720',
       playerVars: {
         controls: 0, disablekb: 1, modestbranding: 1, rel: 0, playsinline: 1,
-        iv_load_policy: 3, fs: 0, origin: location.origin,
+        iv_load_policy: 3, fs: 0, origin: location.origin, cc_load_policy: 0,
       },
       events: {
         onReady: () => { player = p; resolve(p); },
-        onStateChange: (e) => stateListeners.forEach((fn) => fn(e.data)),
+        onStateChange: (e) => {
+          // legenda automática do YouTube por cima dos botões (a letra já está na tela)
+          if (e.data === 1) { try { p.unloadModule('captions'); p.unloadModule('cc'); } catch (x) { /* ok */ } }
+          stateListeners.forEach((fn) => fn(e.data));
+        },
         onError: (e) => errorListener && errorListener(e.data),
       },
     });
@@ -120,8 +124,17 @@ export function rewind() {
   // inclui "terminou" (0): sem isso, a revanche achava que a música já tinha acabado
   if (st === 0 || st === 1 || st === 2 || st === 3) { player.seekTo(0, true); player.pauseVideo(); }
 }
-export function seek(t) { if (player) player.seekTo(Math.max(0, t), true); }
-export function time() { return player ? player.getCurrentTime() || 0 : 0; }
+export function seek(t) { tRaw = -1; if (player) player.seekTo(Math.max(0, t), true); }
+// O tempo que o YouTube informa anda "aos pulinhos" (principalmente em PC fraco).
+// Entre um pulinho e outro, a gente completa com o relógio, pra letra andar lisinha.
+let tRaw = -1, tAt = 0;
+export function time() {
+  if (!player) return 0;
+  const raw = player.getCurrentTime() || 0;
+  const now = performance.now();
+  if (raw !== tRaw) { tRaw = raw; tAt = now; return raw; }
+  return player.getPlayerState() === 1 ? raw + Math.min(0.4, (now - tAt) / 1000) : raw;
+}
 export function state() { return player ? player.getPlayerState() : -1; }
 export function isPlaying() { return player && player.getPlayerState() === 1; }
 export function duration() { return player ? player.getDuration() || 0 : 0; }

@@ -441,3 +441,48 @@ body.playing .theme-btn { display: none; }
 
 /* PC bem fraco (detectado sozinho): fundo parado */
 .still .blob { animation-play-state: paused; }
+
+/* ---------- aviso ao vivo: por que a nota não está subindo ---------- */
+.score-status {
+  border-radius: 999px; padding: 9px 20px; font-size: 15px; font-weight: 600; max-width: 100%;
+  text-align: center; line-height: 1.35; cursor: default; color: var(--text);
+  transition: border-color 0.3s, background 0.3s;
+}
+.score-status.ok { border-color: rgba(124,242,154,0.6); color: #b9ffcb; }
+.score-status.info { border-color: rgba(255,255,255,0.3); color: rgba(255,255,255,0.85); }
+.score-status.warn { border-color: rgba(255,209,102,0.75); color: #ffe3a3; background: rgba(255,209,102,0.12); }
+.score-status.bad { border-color: rgba(255,95,130,0.85); color: #ffd0dc; background: rgba(255,60,110,0.2); cursor: pointer; animation: pulse 1.6s ease-in-out infinite; }
+.lyrics-card { position: relative; }
+.line-rate {
+  position: absolute; left: 50%; top: -14px; transform: translate(-50%, 0) scale(0.7); opacity: 0; pointer-events: none;
+  display: block; text-align: center; white-space: nowrap; z-index: 3;
+  padding: 6px 18px; border-radius: 999px; background: rgba(20,12,40,0.88); border: 1px solid rgba(255,255,255,0.25);
+  transition: opacity 0.25s, transform 0.35s var(--spring);
+}
+.line-rate.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+.line-rate b { font-size: 20px; font-weight: 800; letter-spacing: 0.02em; }
+.line-rate .pts { margin-left: 6px; font-weight: 800; color: #ffd166; font-size: 16px; }
+.line-rate small { display: block; font-size: 12px; color: rgba(255,255,255,0.75); font-weight: 600; }
+.line-rate.perfect { border-color: #ffd166; box-shadow: 0 0 30px rgba(255,209,102,0.55); }
+.line-rate.perfect b { color: #ffe08a; }
+.line-rate.great b { color: #7cf29a; }
+.line-rate.good b { color: #9fd3ff; }
+.line-rate.miss b { color: #ffb4c8; }
+.result-tip { font-size: 14px; color: #ffe3a3; text-align: center; padding: 10px 16px; border-radius: 16px; background: rgba(255,209,102,0.08); border: 1px solid rgba(255,209,102,0.3); }
+
+/* ---------- modo leve (PC fraco): sem vidro desfocado nem vídeo borrado ----------
+   Desfocar o vídeo e o fundo a cada quadro é o que mais pesa num PC sem placa de vídeo. */
+.lite .glass, .lite .btn, .lite .overlay, .lite .frost, .lite .tip-word::after {
+  -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
+}
+.lite .glass { background: rgba(30, 20, 56, 0.86); }
+.lite .glass::before { display: none; }
+.lite .btn:not(.btn-primary):not(.is-on) { background: rgba(255,255,255,0.12); }
+.lite .overlay { background: rgba(5,3,12,0.7); }
+.lite .frost { background: rgba(18,10,36,0.55); }
+.lite .frost::after { display: none; }
+.lite .blob { animation: none; }
+.lite #video-wrap iframe { filter: none; }
+.lite #video-wrap::after { content: ""; position: absolute; inset: 0; background: rgba(8,4,18,0.58); }
+.lite .ly-cur { filter: none; }
+.lite .score-status.bad { animation: none; }
