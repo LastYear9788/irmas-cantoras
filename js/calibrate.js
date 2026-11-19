@@ -2,7 +2,7 @@
 // Mede ruído ambiente + voz cantada, ajusta o VoiceGate pro microfone real da pessoa
 // e detecta problemas comuns: mudo, conflito com Discord/Windows, driver travado,
 // supressor de ruído externo (NVIDIA Broadcast/Krisp) e filtros do navegador cortando canto.
-import { mic } from './mic.js?v=18';
+import { mic } from './mic.js?v=19';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -224,7 +224,6 @@ function startAutoCalibration() {
     singMs: 3000,
     quietSamples: [],
     singSamples: [],
-    problems: new Set(),
     dcMax: 0,
   };
 }
@@ -239,9 +238,13 @@ function finishAutoCalibration(r) {
   const s = r.singSamples;
   const checks = [];
 
+  // "mudo" se decide SÓ pela etapa de canto: muito microfone (filtro do Windows/fone,
+  // cancelamento de eco) manda zero absoluto enquanto a pessoa está quieta, e isso é normal
   const allPeaks = [...q, ...s].map((x) => x.peak);
   const maxPeak = allPeaks.length ? Math.max(...allPeaks) : 0;
-  const zeroRatio = [...q, ...s].filter((x) => x.peak === 0).length / Math.max(1, q.length + s.length);
+  const singReal = s.filter((x) => x.peak >= 2e-6).length / Math.max(1, s.length);
+  const singShare = (p) => s.filter((x) => x.problem === p).length / Math.max(1, s.length);
+  const quietZero = q.length ? q.filter((x) => x.peak < 2e-6).length / q.length : 0;
 
   const floor = q.length ? percentile(q.map((x) => x.rms), 0.7) : info.floor;
   // ignora os primeiros 300ms da etapa de canto (tempo de reação da pessoa começar a cantar)
@@ -265,14 +268,14 @@ function finishAutoCalibration(r) {
     && ((lateRms < earlyRms * 0.35) || (lateVoiced < 0.15 && lateRms < earlyRms * 0.55));
 
   // 1) Conflito / mudo / driver travado
-  if (r.problems.has('frozen')) {
+  if (singShare('frozen') > 0.5) {
     checks.push({
       level: 'bad',
       title: 'Áudio do microfone travou (conflito de programa)',
       detail: 'O microfone parou de mandar áudio novo. Isso costuma acontecer quando Discord, Zoom ou o "Modo Exclusivo" do Windows trava o dispositivo. Tente reiniciar ou trocar o microfone acima.',
       action: { id: 'restart', label: '🔄 Reiniciar microfone' },
     });
-  } else if (r.problems.has('muted') || r.problems.has('silent') || maxPeak === 0 || zeroRatio > 0.85) {
+  } else if (singShare('muted') > 0.5 || maxPeak === 0 || singReal < 0.1) {
     checks.push({
       level: 'bad',
       title: 'Microfone mudo ou sem sinal',
@@ -283,7 +286,8 @@ function finishAutoCalibration(r) {
     checks.push({
       level: 'ok',
       title: 'Sinal do microfone chegando normalmente',
-      detail: `${info.label || 'Microfone ativo'}${info.sampleRate ? ` (${Math.round(info.sampleRate / 1000)} kHz)` : ''}.`,
+      detail: `${info.label || 'Microfone ativo'}${info.sampleRate ? ` (${Math.round(info.sampleRate / 1000)} kHz)` : ''}.`
+        + (quietZero > 0.5 ? ' Ele zera o som quando você fica quieta (filtro do Windows/fone) — tudo bem, não atrapalha.' : ''),
     });
   }
 
@@ -302,8 +306,21 @@ function finishAutoCalibration(r) {
     });
   }
 
+  // cantou/falou (ou tinha música tocando) na etapa do silêncio: o "ruído" medido é a própria voz,
+  // então as contas de ruído e volume não valem. Avisa em vez de dizer "não ouvi voz".
+  const quietVoiced = q.length ? q.filter((x) => x.voiced).length / q.length : 0;
+  const noisyQuiet = maxPeak > 0 && quietVoiced > 0.25 && voiceLevel < floor * 1.5;
+  if (noisyQuiet) {
+    checks.push({
+      level: 'warn',
+      title: 'Ouvi voz ou música na etapa do silêncio',
+      detail: 'Nos 2 primeiros segundos fique quietinha (e pause música/vídeo tocando na caixa de som) pra eu medir o ambiente. Seu microfone está funcionando — é só testar de novo.',
+      action: { id: 'retry', label: '🔁 Calibrar de novo' },
+    });
+  }
+
   // 3) Ruído ambiente
-  if (maxPeak > 0) {
+  if (maxPeak > 0 && !noisyQuiet) {
     if (floor > 0.022) {
       checks.push({
         level: 'warn',
@@ -339,7 +356,7 @@ function finishAutoCalibration(r) {
   }
 
   // 5) Volume e reconhecimento da nota cantada
-  if (maxPeak > 0) {
+  if (maxPeak > 0 && !noisyQuiet) {
     if (voiceLevel < Math.max(0.006, floor * 1.5)) {
       checks.push({
         level: 'bad',
@@ -467,16 +484,15 @@ function loop() {
   if (run) {
     const elapsed = performance.now() - run.startedAt;
     const total = run.quietMs + run.singMs;
-    if (st.problem) run.problems.add(st.problem);
     if (m.dc > run.dcMax) run.dcMax = m.dc;
     if (elapsed < run.quietMs) {
-      run.quietSamples.push({ rms: m.rms, peak: m.peak, dc: m.dc });
+      run.quietSamples.push({ rms: m.rms, peak: m.peak, dc: m.dc, voiced: m.voiced });
       const left = Math.ceil((run.quietMs - elapsed) / 1000);
       $('cal-step-text').textContent = `1/2 · 🤫 Fique em silêncio (${left}s) — medindo ruído do ambiente…`;
       $('cal-progress-fill').style.width = ((elapsed / total) * 100).toFixed(1) + '%';
     } else if (elapsed < total) {
       const rel = elapsed - run.quietMs;
-      run.singSamples.push({ rel, rms: m.rms, peak: m.peak, voiced: m.voiced, pitch: m.pitch, clarity: m.clarity });
+      run.singSamples.push({ rel, rms: m.rms, peak: m.peak, voiced: m.voiced, pitch: m.pitch, clarity: m.clarity, problem: st.problem });
       const left = Math.ceil((total - elapsed) / 1000);
       $('cal-step-text').textContent = `2/2 · 🎤 Cante um "Aaaaaaa" firme (${left}s)…`;
       $('cal-progress-fill').style.width = ((elapsed / total) * 100).toFixed(1) + '%';
@@ -494,7 +510,7 @@ function loop() {
     txt.textContent = '🔇 Microfone no mudo (no Windows, botão do fone ou outro programa)';
   } else if (st.problem === 'silent') {
     box.className = 'cal-live bad';
-    txt.textContent = '🔇 Silêncio total chegando — verifique mudo ou conflito com Discord/Zoom';
+    txt.textContent = '🔇 Nenhum som chegou ainda — fale algo; se continuar assim, confira o mudo do fone/Windows ou se Discord/Zoom pegou o microfone';
   } else if (st.problem === 'frozen') {
     box.className = 'cal-live bad';
     txt.textContent = '⚠️ Áudio travado (conflito de driver/programa) — clique em 🔄 Reiniciar';

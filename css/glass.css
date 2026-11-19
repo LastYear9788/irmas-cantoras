@@ -275,6 +275,7 @@ main { position: relative; z-index: 2; min-height: 100vh; }
 .choice small { display: block; font-size: 13px; color: var(--muted); margin-top: 2px; }
 .link { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 13px; text-decoration: underline; padding: 4px; align-self: center; }
 .link:hover { color: var(--text); }
+.log-link { display: block; margin: 10px auto 0; font-size: 12px; }
 .invite-code { font-weight: 800; letter-spacing: 0.15em; color: #fff; }
 .shake { animation: shake 0.4s; }
 @keyframes shake { 20%, 60% { transform: translateX(-6px); } 40%, 80% { transform: translateX(6px); } }

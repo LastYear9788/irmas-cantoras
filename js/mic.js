@@ -1,5 +1,5 @@
 // Microfone: volume e altura (pitch) da voz, direto no navegador.
-import { detectPitch, VoiceGate } from './pitch.js?v=18';
+import { detectPitch, VoiceGate, SignalWatch } from './pitch.js?v=19';
 
 const CFG_KEY = 'ic-mic-cfg';
 
@@ -45,9 +45,7 @@ function stopMonitor() {
 let recorder = null;
 let gate = new VoiceGate();
 let last = null, lastAt = 0;
-let silentSince = 0;      // desde quando o microfone manda silêncio absoluto (zerado)
-let frozenSince = 0;      // desde quando o buffer repete amostras idênticas (driver/conflito travado)
-let prevSig = null;
+let watch = new SignalWatch();   // mudo de verdade / travado (do microfone principal)
 let readCost = 0;         // quanto tempo (ms) uma leitura leva, média
 
 const OFF = { rms: 0, level: 0, pitch: 0, voiced: false, loud: false, clarity: 0, peak: 0, dc: 0, threshold: 0.008 };
@@ -77,6 +75,18 @@ function buildAudioConstraints(rawMode, deviceId) {
 function sampleSig(b) {
   const n = b.length;
   return `${b[0]},${b[n >> 3]},${b[n >> 2]},${b[(n * 3) >> 3]},${b[n >> 1]},${b[(n * 5) >> 3]},${b[(n * 3) >> 2]},${b[n - 1]}`;
+}
+
+/**
+ * De onde ler: do "Me ouvir" (áudio cru) se ele estiver funcionando; senão do principal.
+ * Em alguns PCs o Windows entrega silêncio pro 2º acesso ao mesmo microfone: aí
+ * continua pelo principal em vez de ficar "surdo".
+ */
+function source(now) {
+  if (mon && mon.c.state === 'running' && !mon.watch.problem(now)) {
+    return { c: mon.c, an: mon.an, b: mon.buf, h: mon.half, g: mon.gate, w: mon.watch, s: mon.s };
+  }
+  return { c: ctx, an: analyser, b: buf, h: half, g: gate, w: watch, s: stream };
 }
 
 export const mic = {
@@ -140,7 +150,7 @@ export const mic = {
     const tr = stream.getAudioTracks()[0];
     const st = tr && tr.getSettings ? tr.getSettings() : {};
     activeDeviceId = wantDev || st.deviceId || '';
-    last = null; lastAt = 0; silentSince = 0; frozenSince = 0; prevSig = null;
+    last = null; lastAt = 0; watch.reset();
     mic.active = true;
     // fio puxado / fone bluetooth desligou
     const mine = stream;
@@ -162,7 +172,7 @@ export const mic = {
     const s = stream;
     stream = null;
     mic.active = false;
-    last = null; lastAt = 0; silentSince = 0; frozenSince = 0; prevSig = null;
+    last = null; lastAt = 0; watch.reset();
     if (s) s.getTracks().forEach((t) => t.stop());
     if (ctx) { try { ctx.close(); } catch (e) { /* ok */ } ctx = null; }
     analyser = null; src = null;
@@ -205,7 +215,7 @@ export const mic = {
       an.fftSize = pickFftSize(c.sampleRate);
       source.connect(an);
       if (c.state === 'suspended') c.resume().catch(() => {});
-      const entry = { s, c, an, buf: new Float32Array(an.fftSize), half: new Float32Array(an.fftSize / 2), gate: makeGate() };
+      const entry = { s, c, an, buf: new Float32Array(an.fftSize), half: new Float32Array(an.fftSize / 2), gate: makeGate(), watch: new SignalWatch() };
       s.getAudioTracks().forEach((t) => t.addEventListener('ended', () => {
         if (mon === entry) { stopMonitor(); last = null; }
       }));
@@ -255,12 +265,14 @@ export const mic = {
     // ~30 leituras por segundo bastam (e poupam PC fraco: a afinação é a conta mais pesada do jogo)
     if (last && now - lastAt < 30 && (!needPitch || last._hasPitch)) return last;
     lastAt = now;
-    const useMon = !!(mon && mon.c.state === 'running');
-    const c = useMon ? mon.c : ctx;
-    const an = useMon ? mon.an : analyser;
-    const b = useMon ? mon.buf : buf;
-    const h = useMon ? mon.half : half;
-    const g = useMon ? mon.gate : gate;
+    // "Me ouvir" ficou de fora por estar mudo/travado: continua espiando, pra voltar quando ele acordar
+    if (mon && mon.c.state === 'running' && mon.watch.problem(now)) {
+      mon.an.getFloatTimeDomainData(mon.buf);
+      let mp = 0;
+      for (let i = 0; i < mon.buf.length; i++) { const v = Math.abs(mon.buf[i]); if (v > mp) mp = v; }
+      mon.watch.update(mp, mp, mp ? sampleSig(mon.buf) : null, now);
+    }
+    const { c, an, b, h, g, w } = source(now);
     if (!c || !an || !b) return OFF;
     if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
     if (mon && mon.c.state === 'suspended') mon.c.resume().catch(() => {});
@@ -283,16 +295,7 @@ export const mic = {
       if (av > peak) peak = av;
     }
     const rms = Math.sqrt(sum / b.length);
-    if (rawPeak === 0) {
-      if (!silentSince) silentSince = now;
-      frozenSince = 0;
-      prevSig = null;
-    } else {
-      silentSince = 0;
-      const sig = sampleSig(b);
-      if (sig === prevSig) { if (!frozenSince) frozenSince = now; }
-      else { prevSig = sig; frozenSince = 0; }
-    }
+    w.update(rawPeak, peak, rawPeak ? sampleSig(b) : null, now);
 
     const th = g.threshold();
     if (!needPitch) {
@@ -320,24 +323,22 @@ export const mic = {
     last = {
       rms, level: Math.min(1, rms * 8), pitch: voiced ? pitch : 0, voiced, loud,
       clarity: voiced ? clarity : 0, peak, dc: Math.abs(mean), threshold: g.threshold(), _hasPitch: true,
+      // pro relatório de diagnóstico: o que o detector achou antes do portão, e de qual áudio leu
+      rawPitch: pitch, rawClarity: clarity, floor: g.floor, src: w === watch ? 'main' : 'mon',
     };
     return last;
   },
 
   /** nome do microfone (ex.: "Fone Bluetooth Hands-Free"), pra dar tolerância de atraso */
   label() {
-    const useMon = !!(mon && mon.c.state === 'running');
-    const s = useMon ? mon.s : stream;
+    const { s } = source(performance.now());
     const t = s && s.getAudioTracks()[0];
     return (t && t.label) || '';
   },
 
   /** informações técnicas pro diagnóstico / calibração */
   info() {
-    const useMon = !!(mon && mon.c.state === 'running');
-    const s = useMon ? mon.s : stream;
-    const c = useMon ? mon.c : ctx;
-    const g = useMon ? mon.gate : gate;
+    const { s, c, g, w } = source(performance.now());
     const t = s && s.getAudioTracks()[0];
     const settings = (t && t.getSettings) ? t.getSettings() : {};
     const label = (t && t.label) || '';
@@ -354,6 +355,8 @@ export const mic = {
       threshold: g.threshold(),
       calibrated: !!(cfg.calibratedAt && cfg.calVoice),
       bluetooth,
+      heard: w.heard,     // já chegou som de verdade desde que abriu
+      gated: w.gated,     // o microfone zera o som quando está quieto (filtro do Windows/fone)
     };
   },
 
@@ -366,17 +369,15 @@ export const mic = {
   /** Situação do microfone, pro aviso na tela: o que pode estar impedindo de contar ponto */
   status() {
     if (!mic.active) return { problem: 'off' };
-    const useMon = !!(mon && mon.c.state === 'running');
-    const s = useMon ? mon.s : stream;
-    const c = useMon ? mon.c : ctx;
-    const g = useMon ? mon.gate : gate;
+    const now = performance.now();
+    const { s, c, g, w } = source(now);
     const track = s && s.getAudioTracks()[0];
     if (!track || track.readyState !== 'live') return { problem: 'off' };
     if (track.muted || track.enabled === false) return { problem: 'muted' };  // sistema/outro programa calou o microfone
     if (c && c.state !== 'running' && c.state !== 'suspended') return { problem: 'off' };
     if (c && c.state === 'suspended') return { problem: 'suspended' };
-    if (silentSince && performance.now() - silentSince > 2500) return { problem: 'silent' };
-    if (frozenSince && performance.now() - frozenSince > 2500) return { problem: 'frozen' };
+    const p = w.problem(now);
+    if (p) return { problem: p };
     return { problem: null, floor: g.floor, cost: readCost, label: track.label || '' };
   },
 };

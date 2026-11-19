@@ -1,9 +1,10 @@
 // Testes automáticos (sem navegador). Rodar com:  node tests/run.mjs
 import { Scorer, syllables } from '../js/score.js';
-import { detectPitch, VoiceGate } from '../js/pitch.js';
+import { detectPitch, VoiceGate, SignalWatch } from '../js/pitch.js';
 import { assignParts, ALL } from '../js/parts.js';
 import { parseLRC, buildQueries } from '../js/lyrics.js';
 import { cleanName } from '../js/net.js';
+import { createLog, analyze } from '../js/singlog.js';
 
 let passed = 0, failed = 0;
 function test(name, fn) {
@@ -283,6 +284,56 @@ test('pontuação ao vivo é leve (música de 80 linhas: < 2 ms por cálculo)', 
   const t0 = performance.now(); for (let i = 0; i < 50; i++) s.live();
   const ms = (performance.now() - t0) / 50;
   assert(ms < 2, ms.toFixed(2) + ' ms');
+});
+
+console.log('\nMicrofone mudo x microfone com filtro');
+{
+  // simula leituras a cada 30ms: kind = 'zero' | 'voz' | 'igual'
+  const feed = (w, t0, ms, kind) => {
+    for (let t = t0; t < t0 + ms; t += 30) {
+      if (kind === 'zero') w.update(0, 0, null, t);
+      else if (kind === 'igual') w.update(0.1, 0.1, 'x', t);
+      else w.update(0.1, 0.1, 's' + t, t);
+    }
+    return t0 + ms;
+  };
+  test('mudo de verdade (só zero desde o começo) avisa', () => {
+    const w = new SignalWatch(); const t = feed(w, 0, 3000, 'zero');
+    assert(w.problem(t) === 'silent', 'deu ' + w.problem(t));
+  });
+  test('filtro que zera quando quieta (calibração começa em silêncio) NÃO é mudo depois que canta', () => {
+    const w = new SignalWatch(); let t = feed(w, 0, 2000, 'zero');
+    t = feed(w, t, 3000, 'voz');
+    assert(w.problem(t) === null, 'deu ' + w.problem(t));
+  });
+  test('zero longo entre frases (ou na vez da outra) depois de já ter ouvido som não é mudo', () => {
+    const w = new SignalWatch(); let t = feed(w, 0, 500, 'voz');
+    t = feed(w, t, 60000, 'zero');
+    assert(w.problem(t) === null && w.gated, 'deu ' + w.problem(t));
+  });
+  test('áudio travado (mesmo som repetido) avisa e some quando volta a andar', () => {
+    const w = new SignalWatch(); let t = feed(w, 0, 3000, 'igual');
+    assert(w.problem(t) === 'frozen', 'não avisou');
+    t = feed(w, t, 100, 'voz');
+    assert(w.problem(t) === null, 'não limpou');
+  });
+}
+
+console.log('\nRelatório de diagnóstico');
+test('relatório registra, vira JSON e a análise acha o momento que parou de contar', () => {
+  let now = 0;
+  const log = createLog({ version: 'teste', song: { title: 'Música' } }, () => now);
+  for (let k = 0; k < 1500; k++, now += 40) {   // 60s a 25x/s; depois de 30s o corte sobe acima da voz
+    const late = k > 750;
+    log.tick({ lt: k * 0.04, active: 0, mine: true, yt: 1, dt: 0.04, rms: 0.03, threshold: late ? 0.035 : 0.01, floor: 0.004,
+      peak: 0.1, rawPitch: 220, rawClarity: 0.9, voiced: !late, loud: !late, problem: null, src: 'main' });
+  }
+  log.event('aviso', 'quiet');
+  log.finish({ final: { total: 5000, presence: 50, tune: 90, timbre: 90, rhythm: 90 } });
+  const back = JSON.parse(JSON.stringify(log));
+  assert(back.rows === 1500 && back.cols.rms.length === 1500 && !back.tick, 'JSON errado');
+  const txt = analyze(back);
+  assert(/baixo demais/.test(txt) && /quase não contou/.test(txt) && /volume típico 300 vs corte 350/.test(txt), txt);
 });
 
 console.log('\nDivisão das partes');

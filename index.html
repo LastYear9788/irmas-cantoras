@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Irmãs Cantoras</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎤</text></svg>">
-  <link rel="stylesheet" href="css/glass.css?v=18">
+  <link rel="stylesheet" href="css/glass.css?v=19">
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <script>
     document.documentElement.classList.toggle('theme-new', localStorage.getItem('ic-theme') !== 'classic');
@@ -16,8 +16,8 @@
         document.documentElement.classList.add('lite');
     } catch (e) { /* ok */ }
   </script>
-  <script type="module" src="js/app.js?v=18"></script>
-  <script type="module" src="js/theme.js?v=18"></script>
+  <script type="module" src="js/app.js?v=19"></script>
+  <script type="module" src="js/theme.js?v=19"></script>
 </head>
 <body>
   <!-- Fundo animado (é o que dá vida ao vidro) -->
@@ -228,6 +228,7 @@
           <p id="rec-msg" class="hint center">Ao ouvir aqui, sua voz toca junto com a música. O arquivo baixado salva só sua voz. Só você escuta.</p>
         </div>
         <p id="night-score" class="night-score hidden"></p>
+        <button id="btn-log" class="link log-link hidden" type="button" title="Baixa um arquivo com o que o microfone ouviu em cada momento. Serve pra descobrir por que a nota não contou.">📋 Baixar relatório técnico (pra achar problemas)</button>
         <div id="result-host" class="row center wrap">
           <button id="btn-rematch" class="btn">Revanche</button>
           <button id="btn-other" class="btn btn-primary">Outra música</button>
@@ -298,6 +299,7 @@
 
       <div id="cal-checks" class="cal-checks hidden"></div>
 
+      <button id="cal-log" class="link log-link" type="button" title="Arquivo com o que o microfone ouviu na última música cantada neste PC">📋 Baixar relatório da última música</button>
       <button id="cal-done" class="btn btn-small cal-done-btn" type="button">Fechar</button>
     </div>
   </div>

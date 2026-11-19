@@ -92,6 +92,38 @@ export function detectPitch(src, rate) {
 }
 
 /**
+ * Vigia o sinal bruto do microfone pra saber se ele está mudo/travado DE VERDADE.
+ * Cuidado: muito microfone (filtro do Windows, do fone, cancelamento de eco do navegador)
+ * manda zero absoluto quando a pessoa fica quieta. Isso não é defeito: se já chegou som
+ * real alguma vez desde que o microfone abriu, silêncio digital é só "quieto".
+ */
+export const REAL_SIGNAL = 2e-6;
+export class SignalWatch {
+  constructor() { this.reset(); }
+  reset() { this.heard = false; this.silentSince = 0; this.frozenSince = 0; this.prevSig = null; this.gated = false; }
+  /** rawPeak = maior amostra, peak = maior amostra sem DC, sig = "assinatura" do buffer */
+  update(rawPeak, peak, sig, now) {
+    if (rawPeak === 0 || peak < REAL_SIGNAL) {
+      // silêncio digital (ou nível constante, que também é silêncio)
+      if (!this.silentSince) this.silentSince = now;
+      if (this.heard) this.gated = true;
+      this.frozenSince = 0; this.prevSig = null;
+      return;
+    }
+    this.heard = true;
+    this.silentSince = 0;
+    // mesmo som real repetido entre leituras = o áudio parou de andar (driver travado)
+    if (sig === this.prevSig) { if (!this.frozenSince) this.frozenSince = now; }
+    else { this.prevSig = sig; this.frozenSince = 0; }
+  }
+  problem(now) {
+    if (!this.heard && this.silentSince && now - this.silentSince > 2500) return 'silent';
+    if (this.frozenSince && now - this.frozenSince > 2500) return 'frozen';
+    return null;
+  }
+}
+
+/**
  * Decide se tem voz cantando agora e mantém a medida do barulho ambiente se adaptando
  * (antes era medido uma vez só ao ligar o microfone: se tivesse alguém falando naquela hora,
  * o app ficava "surdo" o resto da noite).

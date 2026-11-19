@@ -1,6 +1,6 @@
 // Escolha do visual: "Novo" (bolhas + vidro líquido) ou "Clássico", + controle do Modo Leve. Fica salvo no navegador.
-import { startBubbles, stopBubbles, pauseBubbles, freezeBubbles, unfreezeBubbles, onSlow } from './bubbles.js?v=18';
-import { enableLiquid, disableLiquid } from './liquid.js?v=18';
+import { startBubbles, stopBubbles, pauseBubbles, freezeBubbles, unfreezeBubbles, onSlow } from './bubbles.js?v=19';
+import { enableLiquid, disableLiquid } from './liquid.js?v=19';
 
 const btn = document.getElementById('btn-theme');
 const btnLite = document.getElementById('btn-lite');

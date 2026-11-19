@@ -1,12 +1,13 @@
 // Irmãs Cantoras — fluxo do app (telas, lobby, jogo, resultado)
-import { net } from './net.js?v=18';
-import * as yt from './youtube.js?v=18';
-import { findLyrics } from './lyrics.js?v=18';
-import { assignParts, ALL } from './parts.js?v=18';
-import { mic } from './mic.js?v=18';
-import { Scorer } from './score.js?v=18';
-import { cam } from './cam.js?v=18';
-import { initCalibration, isCalibrationOpen, closeCalibration, renderBadges } from './calibrate.js?v=18';
+import { net } from './net.js?v=19';
+import * as yt from './youtube.js?v=19';
+import { findLyrics } from './lyrics.js?v=19';
+import { assignParts, ALL } from './parts.js?v=19';
+import { mic } from './mic.js?v=19';
+import { Scorer } from './score.js?v=19';
+import { cam } from './cam.js?v=19';
+import { initCalibration, isCalibrationOpen, closeCalibration, renderBadges } from './calibrate.js?v=19';
+import { createLog, saveLog, lastLog, downloadLog } from './singlog.js?v=19';
 
 const COLORS = ['#ff5fa2', '#4fb3ff', '#ffd166', '#7cf29a'];
 const ALL_COLOR = '#b388ff';
@@ -249,6 +250,7 @@ function syncMicUi() {
 initCalibration(syncMicUi);
 
 mic.onLost = () => {
+  logEv('micLost');
   toast('O microfone desconectou! Conecta de novo e clica em "Ativar microfone" 🎤', 6000);
   syncMicUi();
   if (state.ready) { state.ready = false; net.setReady(false); renderLobby(); }
@@ -600,6 +602,7 @@ net.on('start', async (msg) => {
     shots: cam.active ? planShots(lines, msg.who, myIndex) : null,
     myPhotos: [], peakPhoto: null, peak: 0, lastPeakShot: 0,
   };
+  if (myIndex >= 0) state.game.log = newLog(state.game);
   renderShiftVal(savedShift);
   state.photos = Object.create(null);
   renderPhotos();
@@ -697,6 +700,7 @@ function syncVideo(g) {
       if (!sy.warned) { sy.warned = true; toast('Seu PC/internet está lento pro vídeo: ele pode ficar um pouquinho fora do tempo das outras. A nota continua valendo 🙂', 6000); }
     }
     sy.lastSeek = now;
+    logEv('seek', { drift: +drift.toFixed(2), lead: sy.lead, tol: sy.tol });
     yt.seek(expected + (drift < 0 ? sy.lead : 0));
     return;
   }
@@ -716,8 +720,14 @@ function checkEnd(g) {
 
 // voltou pra janela? acerta o tempo na hora
 document.addEventListener('visibilitychange', () => {
+  logEv(document.hidden ? 'hidden' : 'visible');
+  if (document.hidden && state.game && state.game.log) saveLog(state.game.log);
   if (!document.hidden && state.game) syncVideo(state.game);
 });
+yt.onState((st) => logEv('yt', st));
+addEventListener('error', (e) => logEv('error', String((e && e.message) || e).slice(0, 200)));
+addEventListener('unhandledrejection', (e) => logEv('error', String((e && e.reason && e.reason.message) || (e && e.reason) || '').slice(0, 200)));
+addEventListener('pagehide', () => { if (state.game && state.game.log) saveLog(state.game.log); });
 
 $('btn-tap').onclick = () => {
   const g = state.game; if (!g) return;
@@ -740,7 +750,7 @@ function lyricPos(g) {
 function gameLoop(round) {
   const g = state.game;
   if (!g || g.round !== round || g.finished) return;
-  requestAnimationFrame((now) => { watchFps(now); gameLoop(round); });
+  requestAnimationFrame((now) => { watchFps(now); g.frames = (g.frames || 0) + 1; gameLoop(round); });
   if (!g.started) return;
 
   const { lt, k, active } = lyricPos(g);
@@ -772,6 +782,10 @@ function scoreLoop(round) {
     const playing = yt.isPlaying();
     if (playing) { g.sawPlaying = true; g.scorer.frame(active, lt, m, dt); cameraFrame(g, active, lt, m); }
     if (g.myIndex >= 0) diagnose(g, active, lt, m, playing, dt);
+    if (g.log) {
+      const ms = mic.status();
+      g.log.tick({ ...m, lt, active, dt, mine: active >= 0 && isMine(g.who[active]), yt: yt.state(), problem: ms.problem });
+    }
     if (active !== g.prevActive) {
       if (g.prevActive >= 0 && g.myIndex >= 0) rateLine(g, g.prevActive);
       g.prevActive = active;
@@ -784,9 +798,41 @@ function scoreLoop(round) {
       state.live[net.myId] = score;
       updateScores(active);
       if (g.myIndex >= 0) net.broadcast({ type: 'live', round: g.round, score });
+      if (g.log) {
+        g.log.event('score', score);
+        g.log.event('fps', g.frames || 0); g.frames = 0;
+        // guarda de tempos em tempos: se a aba fechar ou o PC travar, o relatório não se perde
+        if (now - (g.logSaved || 0) > 30000) { g.logSaved = now; saveLog(g.log); }
+      }
     }
   }, 40);
 }
+
+/* ---------- relatório de diagnóstico (pra descobrir depois por que não contou) ---------- */
+function logEv(type, data) { const g = state.game; if (g && g.log && !g.finished) g.log.event(type, data); }
+function newLog(g) {
+  const info = mic.info();
+  const cfg = mic.getConfig();
+  return createLog({
+    version: (new URL(import.meta.url).searchParams.get('v')) || '?',
+    song: { videoId: state.song.videoId, title: state.song.title || '', lines: g.lines.length },
+    mode: state.mode, players: g.players.length, myIndex: g.myIndex,
+    myLines: g.who.filter((w) => isMine(w)).length,
+    shift: g.shift, hearMe,
+    device: {
+      ua: navigator.userAgent, cores: navigator.hardwareConcurrency || 0, memory: navigator.deviceMemory || 0,
+      lite: document.documentElement.classList.contains('lite'), screen: `${screen.width}x${screen.height}`,
+    },
+    mic: { ...info, settings: info.settings || {}, cal: { floor: cfg.calFloor, voice: cfg.calVoice, at: cfg.calibratedAt, device: cfg.calDevice } },
+    latency: g.scorer.latency,
+  });
+}
+$('btn-log').onclick = $('cal-log').onclick = () => {
+  const g = state.game;
+  const log = (g && g.log) || lastLog();
+  if (!downloadLog(log)) toast('Ainda não tem relatório: cante uma música primeiro 🙂');
+  else toast('Relatório baixado! Manda o arquivo .json pra quem está te ajudando 📋', 5000);
+};
 
 /* ---------- aviso ao vivo: por que a nota não está subindo ---------- */
 function newDiag() {
@@ -798,7 +844,7 @@ const STATUS = {
   go: ['info', '🎤 Sua vez, canta!'],
   off: ['bad', '🎤 O microfone desligou. Clique aqui pra ligar de novo'],
   muted: ['bad', '🔇 O microfone está no mudo (Windows, botão do fone ou outro app). Tira do mudo ou clique aqui pra reiniciar'],
-  silent: ['bad', '🔇 Silêncio total no microfone (mudo ou conflito com Discord/Zoom). Clique aqui pra reiniciar o microfone'],
+  silent: ['bad', '🔇 Nenhum som chegou do microfone ainda (mudo ou Discord/Zoom usando). Canta, ou clique aqui pra reiniciar o microfone'],
   frozen: ['bad', '⚠️ O microfone travou por conflito com outro programa. Clique aqui pra reiniciar agora'],
   suspended: ['bad', '🔈 O navegador pausou o áudio. Clique aqui pra voltar a contar pontos'],
   buffering: ['warn', '⏳ O vídeo está carregando… os pontos voltam quando a música andar'],
@@ -859,6 +905,7 @@ function diagnose(g, active, lt, m, playing, dt) {
 }
 
 function setStatus(key, text) {
+  logEv('aviso', key || '-');
   const el = $('score-status');
   if (!key) { el.classList.add('hidden'); el.dataset.key = ''; return; }
   const [cls, msg] = STATUS[key];
@@ -873,6 +920,7 @@ $('score-status').onclick = async () => {
   if (key === 'off') { if (await startMic()) toast('Microfone ligado de novo 🎤'); }
   else if (key === 'suspended') mic.resume();
   else if (key === 'muted' || key === 'silent' || key === 'frozen') {
+    logEv('micRestart', key);
     try {
       await mic.restart();
       syncMicUi();
@@ -891,6 +939,7 @@ function rateLine(g, i) {
   const r = g.scorer.lineResult(i);
   if (!r) return;
   const v = r.v;
+  logEv('linha', { i, nota: Math.round(v * 100), pts: r.points, fol: Math.round(r.presence * 100), afi: Math.round(r.tune * 100), tim: Math.round(r.timbre * 100), rit: Math.round(r.rhythm * 100) });
   const [label, cls] = v >= 0.92 ? ['✨ PERFEITO!', 'perfect'] : v >= 0.8 ? ['🔥 Ótimo!', 'great'] : v >= 0.6 ? ['👍 Bom', 'good']
     : v >= 0.35 ? ['🙂 Ok', 'ok'] : ['😬 Ops…', 'miss'];
   // o que mais atrapalhou nessa linha (só quando não foi ótima)
@@ -1237,6 +1286,7 @@ function renderShiftVal(v) {
   $('sync-val').textContent = (v > 0 ? '+' : '') + v.toFixed(1).replace('.', ',') + 's';
 }
 function setShift(d) {
+  logEv('letra', d);
   const g = state.game; if (!g) return;
   g.shift = Math.max(-30, Math.min(30, Math.round((g.shift + d) * 10) / 10));
   renderShiftVal(g.shift);
@@ -1267,6 +1317,11 @@ function finishRound() {
 
   if (g.myIndex >= 0) {
     const result = g.scorer.final();
+    if (g.log) {
+      g.log.finish({ final: result, diagWhy: g.diag && g.diag.why, mic: mic.info(), sync: g.sync || null });
+      saveLog(g.log);
+    }
+    $('btn-log').classList.toggle('hidden', !g.log);
     net.broadcast({ type: 'final', round: g.round, result });
     sendPhotos(g);
   }

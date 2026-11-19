@@ -47,6 +47,8 @@ Site estático, sem build: HTML + CSS + JavaScript puro.
 - `js/parts.js`: quem canta cada linha.
 - `js/mic.js` / `js/pitch.js` / `js/score.js`: microfone, detector de afinação e nota.
 - `tests/run.mjs`: testes automáticos da nota e do detector (`node tests/run.mjs`).
+- `js/singlog.js`: relatório técnico da cantoria (botão "📋 Baixar relatório" no resultado e na calibração).
+  Pra ler um relatório: `node tools/analisar-relatorio.mjs arquivo.json`.
 - `js/app.js`: telas e fluxo.
 
 Rodar no PC: `python -m http.server 8000` nesta pasta e abrir `http://localhost:8000`.
