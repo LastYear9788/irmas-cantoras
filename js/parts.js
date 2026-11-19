@@ -3,7 +3,7 @@
 
 export const ALL = -1;
 
-const norm = (s) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
+const norm = (s) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
 
 export function assignParts(lines, mode, playerCount) {
   if (mode === 'together' || playerCount < 2) return lines.map(() => ALL);

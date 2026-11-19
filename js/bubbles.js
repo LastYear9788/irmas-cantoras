@@ -136,6 +136,9 @@ export function pauseBubbles(p) {
 /** PC bem fraco: bolhas ficam paradas de vez. */
 export function freezeBubbles() { pauseBubbles(true); frozen = true; }
 
+/** Sai do modo leve: libera as bolhas pra voltarem a se mexer. */
+export function unfreezeBubbles() { frozen = false; pauseBubbles(false); }
+
 function onMove(e) {
   if (e.pointerType === 'touch') return;
   if (mouse.has) { mouse.vx = e.clientX - mouse.x; mouse.vy = e.clientY - mouse.y; }

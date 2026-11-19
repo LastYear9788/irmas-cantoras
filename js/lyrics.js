@@ -73,8 +73,8 @@ function search(params) {
 }
 
 /* ---------- conferir se é a mesma música (pelo nome) ---------- */
-const normName = (x) => (x || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
-  .replace(/\(.*?\)|\[.*?\]/g, ' ').replace(/[^a-z0-9぀-鿿 ]/g, ' ').replace(/\s+/g, ' ').trim();
+const normName = (x) => (x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  .replace(/\(.*?\)|\[.*?\]/g, ' ').replace(/[^a-z0-9\u3040-\u9fff ]/g, ' ').replace(/\s+/g, ' ').trim();
 
 /** o nome da música encontrada tem que aparecer no título do vídeo (e o artista também, se der) */
 let relaxed = false;   // 2ª tentativa: o título do vídeo não tem o nome do artista (ex: canal de TV)
@@ -142,10 +142,10 @@ async function proxiedNow(url, opts) {
 }
 
 const ODD_ALL = /remix|cover|live|ao vivo|acustico|instrumental|karaoke|sped up|slowed|bootleg|remaster/g;
-const plain = (x) => (x || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+const plain = (x) => (x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
 /** escolhe até 3 candidatas com o mesmo nome, da duração mais parecida pra menos */
-function pickCandidates(items, videoDuration, wantsVersion, hay) {
+function pickCandidates(items, videoDuration, hay) {
   return items
     .filter((c) => sameSong(c.track, c.artist, hay))
     .map((c) => {
@@ -154,7 +154,7 @@ function pickCandidates(items, videoDuration, wantsVersion, hay) {
       let extra = (plain(c.track).match(ODD_ALL) || []).filter((w) => !hay.includes(w)).length;
       // qualquer outra coisa entre parênteses que o vídeo não tem (ex: "(Pianoforte)", "(Acoustic)") = outra versão
       for (const m of plain(c.track).matchAll(/[(\[]([^)\]]+)[)\]]/g)) {
-        const words = m[1].replace(/(feat|ft|with|com|part|from|remaster(ed)?|\d{4}|version|versao|radio edit)\.?/g, ' ').trim().split(/\s+/).filter((w) => w.length > 2);
+        const words = m[1].replace(/\b(feat|ft|with|com|part|from|remaster(ed)?|\d{4}|version|versao|radio edit)\b\.?/g, ' ').trim().split(/\s+/).filter((w) => w.length > 2);
         if (words.length && !words.every((w) => hay.includes(w))) extra++;
       }
       return { ...c, diff, score: diff + extra * 30 };
@@ -167,7 +167,10 @@ function pickCandidates(items, videoDuration, wantsVersion, hay) {
 let dzJwt = null, dzJwtAt = 0;
 async function deezerJwt() {
   if (dzJwt && Date.now() - dzJwtAt < 10 * 60 * 1000) return dzJwt;
-  const d = await fetchJSON('https://auth.deezer.com/login/anonymous?jo=p&rto=c&i=c');
+  const authUrl = 'https://auth.deezer.com/login/anonymous?jo=p&rto=c&i=c';
+  let d;
+  try { d = await fetchJSON(authUrl); }
+  catch (e) { if (e.byDeadline) throw e; d = await proxied(authUrl); }
   dzJwt = d.jwt; dzJwtAt = Date.now();
   return dzJwt;
 }
@@ -191,10 +194,10 @@ function deezerSearchNow(url) {
   });
 }
 
-async function deezerFind(text, videoDuration, wantsVersion, hay) {
+async function deezerFind(text, videoDuration, hay) {
   const res = await deezerSearch(text);
   const items = ((res && res.data) || []).map((t) => ({ id: t.id, track: t.title, artist: t.artist && t.artist.name, duration: t.duration }));
-  const cands = pickCandidates(items, videoDuration, wantsVersion, hay);
+  const cands = pickCandidates(items, videoDuration, hay);
   if (!cands.length) return null;
   const jwt = await deezerJwt();
   for (const c of cands) {
@@ -215,12 +218,12 @@ async function deezerFind(text, videoDuration, wantsVersion, hay) {
 }
 
 /* ---------- fonte 3: NetEase (bom pra música internacional) ---------- */
-async function neteaseFind(text, videoDuration, wantsVersion, hay) {
+async function neteaseFind(text, videoDuration, hay) {
   const data = await proxied('https://music.163.com/api/search/get?type=1&limit=10&s=' + encodeURIComponent(text));
   const items = ((data.result && data.result.songs) || []).map((s) => ({
     id: s.id, track: s.name, artist: (s.artists || []).map((a) => a.name).join(', '), duration: s.duration / 1000,
   }));
-  for (const c of pickCandidates(items, videoDuration, wantsVersion, hay)) {
+  for (const c of pickCandidates(items, videoDuration, hay)) {
     const ly = await proxied(`https://music.163.com/api/song/lyric?id=${c.id}&lv=-1&kv=-1&tv=-1`);
     const lrc = ly && ly.lrc && ly.lrc.lyric;
     if (!lrc) continue;
@@ -285,14 +288,13 @@ async function searchAll(queries, hay, title, videoDuration, st) {
   if (good()) return st.best;
 
   // 2) e 3) Deezer e NetEase
-  const wantsVersion = /remix|cover|live|ao vivo|acústico|acustico/i.test(title);
   const texts = [...new Set(queries.map((q) => q.q || `${q.artist_name} ${q.track_name}`))].slice(0, 4);
   for (const find of [deezerFind, neteaseFind]) {
     if (outOfTime()) return null;
     // sem intermediário funcionando, nem tenta (Deezer precisa de um que aceite POST)
     if (!proxyAvailable(find === deezerFind)) continue;
     st.tried++;
-    const res = await Promise.allSettled(texts.map((t) => find(t, videoDuration, wantsVersion, hay)));
+    const res = await Promise.allSettled(texts.map((t) => find(t, videoDuration, hay)));
     if (res.every((x) => x.status === 'rejected')) st.down++;
     res.forEach((x) => { if (x.status === 'fulfilled') consider(x.value); });
     if (good()) return st.best;
@@ -307,7 +309,7 @@ export function parseLRC(lrc) {
     const tags = [...raw.matchAll(/\[(\d+):(\d+(?:[.:]\d+)?)\]/g)];
     if (!tags.length) continue;
     const text = raw.replace(/\[[^\]]*\]/g, '').trim();
-    if (/[　-鿿]/.test(text) && /[:：]/.test(text)) continue;   // créditos em chinês da NetEase
+    if (/[\u3000-\u9fff]/.test(text) && /[:：]/.test(text)) continue;   // créditos em chinês da NetEase
     for (const m of tags) stamps.push({ t: +m[1] * 60 + parseFloat(m[2].replace(':', '.')), text });
   }
   stamps.sort((a, b) => a.t - b.t);

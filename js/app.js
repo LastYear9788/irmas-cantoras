@@ -1,11 +1,12 @@
 // Irmãs Cantoras — fluxo do app (telas, lobby, jogo, resultado)
-import { net } from './net.js?v=17';
-import * as yt from './youtube.js?v=17';
-import { findLyrics } from './lyrics.js?v=17';
-import { assignParts, ALL } from './parts.js?v=17';
-import { mic } from './mic.js?v=17';
-import { Scorer } from './score.js?v=17';
-import { cam } from './cam.js?v=17';
+import { net } from './net.js?v=18';
+import * as yt from './youtube.js?v=18';
+import { findLyrics } from './lyrics.js?v=18';
+import { assignParts, ALL } from './parts.js?v=18';
+import { mic } from './mic.js?v=18';
+import { Scorer } from './score.js?v=18';
+import { cam } from './cam.js?v=18';
+import { initCalibration, isCalibrationOpen, closeCalibration, renderBadges } from './calibrate.js?v=18';
 
 const COLORS = ['#ff5fa2', '#4fb3ff', '#ffd166', '#7cf29a'];
 const ALL_COLOR = '#b388ff';
@@ -141,6 +142,7 @@ function enterLobby() {
   $('home-msg').textContent = '';
   $('room-code').textContent = net.code;
   $('guest-song-hint').classList.add('hidden');
+  $('in-game-hint').classList.add('hidden');
   $('in-url').placeholder = net.isHost ? 'Cole um link do YouTube aqui' : 'Cole um link pra sugerir uma música';
   $('btn-load').textContent = net.isHost ? 'Adicionar' : 'Sugerir';
   $('mode-toggle').classList.toggle('locked', !net.isHost);
@@ -150,6 +152,7 @@ function enterLobby() {
   $('result-guest').classList.toggle('hidden', net.isHost);
   history.replaceState(null, '', location.pathname);
   if (!net.isHost) sessionStorage.setItem('ic-room', net.code); else sessionStorage.removeItem('ic-room');
+  syncMicUi();
   renderMode();
   renderLobby();
   show('lobby');
@@ -225,22 +228,35 @@ net.on('neterror', (e) => console.warn('net', e));
 
 /* ---------- microfone ---------- */
 $('btn-mic').onclick = startMic;
+function syncMicUi() {
+  if (mic.active) {
+    $('btn-mic').textContent = 'Microfone ligado ✓';
+    $('btn-mic').classList.add('is-on');
+    $('btn-mic').disabled = true;
+    const lbl = mic.label();
+    $('mic-msg').textContent = lbl
+      ? `Usando: ${lbl.replace(/\s*\([0-9a-f]{4}:[0-9a-f]{4}\)\s*/gi, '')}. Fale algo: a barra tem que mexer! 🎧`
+      : 'Fale alguma coisa: a barra tem que mexer. Use fone de ouvido! 🎧';
+    $('mic-msg').style.color = '';
+    meterLoop();
+  } else {
+    $('btn-mic').textContent = 'Ativar microfone';
+    $('btn-mic').classList.remove('is-on');
+    $('btn-mic').disabled = false;
+  }
+  renderBadges();
+}
+initCalibration(syncMicUi);
+
 mic.onLost = () => {
   toast('O microfone desconectou! Conecta de novo e clica em "Ativar microfone" 🎤', 6000);
-  $('btn-mic').textContent = 'Ativar microfone';
-  $('btn-mic').classList.remove('is-on');
-  $('btn-mic').disabled = false;
+  syncMicUi();
   if (state.ready) { state.ready = false; net.setReady(false); renderLobby(); }
 };
 async function startMic() {
   try {
     await mic.start();
-    $('btn-mic').textContent = 'Microfone ligado ✓';
-    $('btn-mic').classList.add('is-on');
-    $('btn-mic').disabled = true;
-    $('mic-msg').textContent = 'Fale alguma coisa: a barra tem que mexer. Use fone de ouvido! 🎧';
-    $('mic-msg').style.color = '';
-    meterLoop();
+    syncMicUi();
     // religou no meio da música (o fio tinha soltado): volta a ouvir e a contar
     const g = state.game;
     if (g && !g.finished && g.myIndex >= 0) mic.monitor(hearMe);
@@ -258,9 +274,21 @@ function meterLoop() {
   meterTick();
 }
 function meterTick() {
-  const m = mic.read();
-  $('mic-meter').style.width = (m.level * 100) + '%';
-  $('game-meter').style.width = (m.level * 100) + '%';
+  if (!mic.active) {
+    meterRunning = false;
+    $('mic-meter').style.width = '0%';
+    $('game-meter').style.width = '0%';
+    return;
+  }
+  // só mede volume quando o medidor está visível (no lobby ou jogando); sem gastar CPU de pitch no lobby/resultado
+  const lobbyOn = $('screen-lobby').classList.contains('active');
+  const gameOn = $('screen-game').classList.contains('active');
+  if ((lobbyOn || gameOn) && !isCalibrationOpen()) {
+    const m = mic.read(false);
+    const w = (m.level * 100) + '%';
+    if (lobbyOn) $('mic-meter').style.width = w;
+    if (gameOn) $('game-meter').style.width = w;
+  }
   requestAnimationFrame(meterTick);
 }
 
@@ -330,7 +358,7 @@ function decide(sid, ok) {
   const i = state.pending.findIndex((p) => p.sid === sid);
   if (i < 0) return;
   const [item] = state.pending.splice(i, 1);
-  if (ok) enqueue(item.videoId, item.by);
+  if (ok) enqueue(item.videoId, item.by, item.title);
   else broadcastSetup();
   net.broadcast({ type: 'decision', ok, byId: item.byId, title: item.title });
 }
@@ -362,13 +390,13 @@ function renderPending() {
 
 const isQueued = (id) => !!((state.song && state.song.videoId === id) || loadingId === id || state.queue.some((q) => q.videoId === id));
 
-function enqueue(id, by) {
+function enqueue(id, by, title = 'Vídeo do YouTube') {
   if (isQueued(id)) return;
   if (state.queue.length >= 20) { toast('A fila tá cheia (20 músicas) 😅'); return; }
-  const item = { videoId: id, by, title: 'Vídeo do YouTube' };
+  const item = { videoId: id, by, title: title || 'Vídeo do YouTube' };
   state.queue.push(item);
   broadcastSetup();
-  fetchTitle(item);
+  if (item.title === 'Vídeo do YouTube') fetchTitle(item);
   maybeLoadNext();
 }
 
@@ -474,7 +502,10 @@ function songCard(id, title, status, cls) {
 function broadcastSetup() {
   if (!net.isHost) return;
   // { ...wins } = objeto comum (o PeerJS não sabe enviar o objeto "sem protótipo" usado aqui dentro)
-  net.broadcast({ type: 'setup', song: state.song, mode: state.mode, queue: state.queue, pending: state.pending, wins: { ...state.wins } });
+  net.broadcast({
+    type: 'setup', song: state.song, mode: state.mode, queue: state.queue, pending: state.pending,
+    wins: { ...state.wins }, inGame: !!(state.game && !state.game.finished),
+  });
 }
 
 /* ---------- música (convidada) ---------- */
@@ -488,6 +519,7 @@ net.on('setup', async (msg) => {
   renderPending();
   renderNight();
   if (net.isHost) { renderLobby(); return; }
+  $('in-game-hint').classList.toggle('hidden', !msg.inGame || !!state.game);
   if (state.song && msg.song && state.song.videoId === msg.song.videoId && state.preparedId === msg.song.videoId) { renderLobby(); return; }
   state.song = msg.song;
   $('guest-song-hint').classList.add('hidden');
@@ -551,20 +583,24 @@ function startRound() {
    ============================================================ */
 net.on('start', async (msg) => {
   if (!state.song) return;
+  closeCalibration();
+  $('in-game-hint').classList.add('hidden');
   state.round = msg.round;
   state.finals = Object.create(null);
   state.live = Object.create(null);
   const myIndex = msg.players.findIndex((p) => p.id === net.myId);
   const lines = state.song.lines;
+  const savedShift = getSavedShift(state.song.videoId);
   state.game = {
     round: msg.round, at: msg.at, who: msg.who, players: msg.players, myIndex,
-    lines, scorer: new Scorer(lines, msg.who, myIndex, { latency: /bluetooth|hands-?free|headset|airpods|buds|bt/i.test(mic.label()) ? 0.25 : 0 }),
+    lines, scorer: new Scorer(lines, msg.who, myIndex, { latency: mic.info().bluetooth ? 0.25 : 0 }),
     prevActive: -1,
-    shift: 0, finished: false, started: false, lastLiveSent: 0,
+    shift: savedShift, finished: false, started: false, lastLiveSent: 0,
     diag: newDiag(),
     shots: cam.active ? planShots(lines, msg.who, myIndex) : null,
     myPhotos: [], peakPhoto: null, peak: 0, lastPeakShot: 0,
   };
+  renderShiftVal(savedShift);
   state.photos = Object.create(null);
   renderPhotos();
   clearRecording();
@@ -761,8 +797,9 @@ const STATUS = {
   ok: ['ok', '✅ Contando pontos!'],
   go: ['info', '🎤 Sua vez, canta!'],
   off: ['bad', '🎤 O microfone desligou. Clique aqui pra ligar de novo'],
-  muted: ['bad', '🔇 O microfone está no mudo (no Windows, no botão do fone ou em outro programa). Tira do mudo pra contar pontos'],
-  silent: ['bad', '🔇 O microfone está mandando silêncio total. Confere o botão de mudo do fone/notebook ou se outro programa (Discord, Zoom…) pegou o microfone'],
+  muted: ['bad', '🔇 O microfone está no mudo (Windows, botão do fone ou outro app). Tira do mudo ou clique aqui pra reiniciar'],
+  silent: ['bad', '🔇 Silêncio total no microfone (mudo ou conflito com Discord/Zoom). Clique aqui pra reiniciar o microfone'],
+  frozen: ['bad', '⚠️ O microfone travou por conflito com outro programa. Clique aqui pra reiniciar agora'],
   suspended: ['bad', '🔈 O navegador pausou o áudio. Clique aqui pra voltar a contar pontos'],
   buffering: ['warn', '⏳ O vídeo está carregando… os pontos voltam quando a música andar'],
   quiet: ['warn', '🔉 Não estou ouvindo sua voz. Canta mais alto ou chega mais perto do microfone'],
@@ -789,7 +826,7 @@ function diagnose(g, active, lt, m, playing, dt) {
 
   const ms = mic.status();
   let key = null;
-  if (ms.problem === 'off' || ms.problem === 'muted' || ms.problem === 'silent' || ms.problem === 'suspended') key = ms.problem;
+  if (ms.problem === 'off' || ms.problem === 'muted' || ms.problem === 'silent' || ms.problem === 'frozen' || ms.problem === 'suspended') key = ms.problem;
   else if (d.notPlaying > 1.2 && $('tap-overlay').classList.contains('hidden') && yt.state() !== 0) key = 'buffering';
   else if (resting) key = d.shown === 'ok' ? 'ok' : null;
   else if (mineNow) {
@@ -835,6 +872,15 @@ $('score-status').onclick = async () => {
   const key = $('score-status').dataset.key;
   if (key === 'off') { if (await startMic()) toast('Microfone ligado de novo 🎤'); }
   else if (key === 'suspended') mic.resume();
+  else if (key === 'muted' || key === 'silent' || key === 'frozen') {
+    try {
+      await mic.restart();
+      syncMicUi();
+      const g = state.game;
+      if (g && !g.finished && g.myIndex >= 0) mic.monitor(hearMe);
+      toast('Microfone reiniciado 🎤');
+    } catch (e) { toast(e.message || 'Não consegui reiniciar o microfone', 5000); }
+  }
 };
 // o navegador pode pausar o áudio até a pessoa clicar em algo
 document.addEventListener('pointerdown', () => { if (mic.active) mic.resume(); }, { passive: true });
@@ -875,19 +921,21 @@ function resultTip(g) {
     off: 'o microfone estava desligado',
     muted: 'o microfone estava no mudo',
     silent: 'o microfone estava mandando silêncio (mudo no fone/notebook ou outro programa usando)',
+    frozen: 'o microfone travou por conflito com outro programa (Discord/Zoom/Windows)',
     suspended: 'o navegador tinha pausado o áudio',
     buffering: 'o vídeo estava carregando (internet ou PC lento)',
     quiet: 'não deu pra ouvir sua voz (canta mais alto ou chega perto do microfone)',
     noisy: 'o microfone ouviu som, mas não nota cantada (fala, sussurro ou barulho)',
     leak: 'tinha muito barulho no microfone (use fone de ouvido)',
   };
-  return tips[top] ? `💡 Em ${pct}% da sua vez a nota não contou porque ${tips[top]}.` : '';
+  return tips[top] ? `💡 Em ${pct}% da sua vez a nota não contou porque ${tips[top]}. Dica: use "🔧 Calibrar" no lobby.` : '';
 }
 
 /* ---------- PC fraco: se a tela estiver desenhando devagar, liga o modo leve ---------- */
 let fpsStart = 0, fpsSum = 0, fpsN = 0, fpsLast = 0;
 function watchFps(now) {
   if (document.documentElement.classList.contains('lite')) return;
+  try { if (localStorage.getItem('ic-lite') === '0') return; } catch (e) { /* ok */ }
   const gap = fpsLast ? now - fpsLast : 0;
   fpsLast = now;
   if (!gap || gap > 400 || document.hidden) return;        // aba escondida / travadinha isolada não conta
@@ -900,10 +948,40 @@ function watchFps(now) {
   document.documentElement.classList.add('lite');
   try { localStorage.setItem('ic-lite', '1'); } catch (e) { /* ok */ }
   window.dispatchEvent(new Event('ic-lite'));
-  toast('Seu PC estava pesando: liguei o modo leve (menos efeitos, mesma diversão) ⚡', 5000);
+  toast('Seu PC estava pesando: liguei o modo leve (dá pra desligar no topo da tela) ⚡', 5000);
 }
 
 let lastRendered = '';
+let curWords = [];
+function buildCurWords(el, text) {
+  curWords = [];
+  if (!text) { el.textContent = ''; return; }
+  const parts = text.split(/(\s+)/);
+  let totalChars = 0;
+  for (const p of parts) if (p && !/^\s+$/.test(p)) totalChars += p.length;
+  totalChars = Math.max(1, totalChars);
+  let acc = 0;
+  el.innerHTML = parts.map((p) => {
+    if (!p) return '';
+    if (/^\s+$/.test(p)) return p;
+    const start = acc / totalChars;
+    acc += p.length;
+    const end = acc / totalChars;
+    return `<span class="ly-word" data-s="${start}" data-e="${end}">${esc(p)}</span>`;
+  }).join('');
+  curWords = [...el.querySelectorAll('.ly-word')].map((node) => ({
+    el: node, start: +node.dataset.s, end: +node.dataset.e, last: -1,
+  }));
+}
+function paintCurWords(progress) {
+  const p = Math.max(0, Math.min(1, progress));
+  for (const w of curWords) {
+    const raw = p <= w.start ? 0 : p >= w.end ? 100 : ((p - w.start) / Math.max(1e-4, w.end - w.start)) * 100;
+    const pct = Math.round(raw * 2) / 2;
+    if (pct !== w.last) { w.last = pct; w.el.style.setProperty('--wp', pct + '%'); }
+  }
+}
+
 function setLyrics(active, k, progress = 0) {
   const g = state.game;
   const lines = g.lines;
@@ -911,29 +989,30 @@ function setLyrics(active, k, progress = 0) {
   const curIdx = active >= 0 ? active : k + 1;
   const key = active + ':' + curIdx;
   const cur = $('ly-cur');
-  cur.style.setProperty('--p', (active >= 0 ? Math.min(100, progress * 100) : 0).toFixed(1) + '%');
-  if (key === lastRendered) return;
-  lastRendered = key;
+  if (key !== lastRendered) {
+    lastRendered = key;
+    const prev = lines[curIdx - 1], line = lines[curIdx], next = lines[curIdx + 1];
+    $('ly-prev').textContent = prev ? prev.text : '';
+    if (line) buildCurWords(cur, line.text);
+    else { curWords = []; cur.textContent = curIdx >= lines.length ? '🎉' : ''; }
+    const nextEl = $('ly-next');
+    nextEl.textContent = next ? next.text : '';
+    const nw = next ? g.who[curIdx + 1] : null;
+    const handoff = !!(next && line && nw !== g.who[curIdx]);
+    nextEl.classList.toggle('handoff', handoff);
+    nextEl.style.setProperty('--nc', next ? colorOf(nw) : '#fff');
+    nextEl.dataset.who = !handoff ? '' : nw === ALL ? 'todas ↓' : nw === g.myIndex ? 'você ↓' : `${(g.players[nw] || {}).name || '?'} ↓`;
+    cur.style.setProperty('--c', line ? colorOf(g.who[curIdx]) : '#fff');
 
-  const prev = lines[curIdx - 1], line = lines[curIdx], next = lines[curIdx + 1];
-  $('ly-prev').textContent = prev ? prev.text : '';
-  cur.textContent = line ? line.text : (curIdx >= lines.length ? '🎉' : '');
-  const nextEl = $('ly-next');
-  nextEl.textContent = next ? next.text : '';
-  const nw = next ? g.who[curIdx + 1] : null;
-  const handoff = !!(next && line && nw !== g.who[curIdx]);
-  nextEl.classList.toggle('handoff', handoff);
-  nextEl.style.setProperty('--nc', next ? colorOf(nw) : '#fff');
-  nextEl.dataset.who = !handoff ? '' : nw === ALL ? 'todas ↓' : nw === g.myIndex ? 'você ↓' : `${(g.players[nw] || {}).name || '?'} ↓`;
-  cur.style.setProperty('--c', line ? colorOf(g.who[curIdx]) : '#fff');
-
-  // o cartão da letra brilha com a cor de quem canta
-  const card = document.querySelector('.lyrics-card');
-  const w = line ? g.who[curIdx] : null;
-  card.style.setProperty('--c', w === null ? 'transparent' : colorOf(w));
-  card.classList.toggle('turn-mine', w !== null && (w === g.myIndex || w === ALL) && g.myIndex >= 0);
-  card.classList.toggle('turn-other', w !== null && w !== g.myIndex && w !== ALL);
-  updateScores(active);
+    // o cartão da letra brilha com a cor de quem canta
+    const card = document.querySelector('.lyrics-card');
+    const w = line ? g.who[curIdx] : null;
+    card.style.setProperty('--c', w === null ? 'transparent' : colorOf(w));
+    card.classList.toggle('turn-mine', w !== null && (w === g.myIndex || w === ALL) && g.myIndex >= 0);
+    card.classList.toggle('turn-other', w !== null && w !== g.myIndex && w !== ALL);
+    updateScores(active);
+  }
+  paintCurWords(active >= 0 ? progress : 0);
 }
 
 /** "SUA VEZ!", "VEZ DE BIA", "TODAS JUNTAS!"… */
@@ -1132,11 +1211,36 @@ $('btn-rec-play').onclick = () => {
 };
 $('rec-download').onclick = (e) => { if (!rec.url) e.preventDefault(); };
 
-/* ---------- ajuste de sincronia da letra ---------- */
+/* ---------- ajuste de sincronia da letra (salvo por música, mantém na revanche!) ---------- */
+const SHIFTS_KEY = 'ic-shifts';
+function loadShifts() {
+  try { const x = JSON.parse(localStorage.getItem(SHIFTS_KEY) || '{}'); return x && typeof x === 'object' ? x : {}; }
+  catch (e) { return {}; }
+}
+function getSavedShift(videoId) {
+  if (!videoId) return 0;
+  const v = Number(loadShifts()[videoId]);
+  return Number.isFinite(v) ? Math.max(-30, Math.min(30, v)) : 0;
+}
+function saveShift(videoId, shift) {
+  if (!videoId) return;
+  try {
+    const map = loadShifts();
+    if (shift === 0) delete map[videoId];
+    else map[videoId] = shift;
+    const keys = Object.keys(map);
+    if (keys.length > 50) delete map[keys[0]];
+    localStorage.setItem(SHIFTS_KEY, JSON.stringify(map));
+  } catch (e) { /* ok */ }
+}
+function renderShiftVal(v) {
+  $('sync-val').textContent = (v > 0 ? '+' : '') + v.toFixed(1).replace('.', ',') + 's';
+}
 function setShift(d) {
   const g = state.game; if (!g) return;
-  g.shift = Math.round((g.shift + d) * 10) / 10;
-  $('sync-val').textContent = (g.shift > 0 ? '+' : '') + g.shift.toFixed(1).replace('.', ',') + 's';
+  g.shift = Math.max(-30, Math.min(30, Math.round((g.shift + d) * 10) / 10));
+  renderShiftVal(g.shift);
+  if (state.song) saveShift(state.song.videoId, g.shift);
 }
 $('btn-sync-plus').onclick = () => setShift(0.5);   // letra aparecendo cedo demais
 $('btn-sync-minus').onclick = () => setShift(-0.5); // letra aparecendo tarde demais
@@ -1157,7 +1261,6 @@ function finishRound() {
   $('tap-overlay').classList.add('hidden');
   setStatus(null);
   $('line-rate').classList.remove('show');
-  setShift(-g.shift); // zera pro próximo
   const tip = resultTip(g);
   $('result-tip').textContent = tip;
   $('result-tip').classList.toggle('hidden', !tip);
@@ -1241,6 +1344,8 @@ function renderResults() {
   $('result-wait').textContent = missing.length && !g.timeout
     ? `Esperando a nota de ${missing.map((x) => x.name).join(', ')}…`
     : (missing.length ? `${missing.map((x) => x.name).join(', ')} não mandou a nota.` : '');
+  $('btn-rematch').disabled = !complete;
+  $('btn-other').disabled = !complete;
   renderNight();
 }
 
@@ -1434,7 +1539,7 @@ function medalsFor(done) {
 /** "Placar da noite: Ana 3 · Bia 2" */
 function renderNight() {
   const el = $('night-score');
-  const ps = net.players.filter((p) => true);
+  const ps = net.players;
   const any = ps.some((p) => state.wins[p.id]);
   el.classList.toggle('hidden', !any || ps.length < 2);
   el.textContent = '🏆 Placar da noite: ' + ps.map((p) => `${p.name} ${state.wins[p.id] || 0}`).join(' · ');
@@ -1455,6 +1560,7 @@ $('btn-other').onclick = () => {
 net.on('lobby', (msg) => {
   clearRecording();
   state.game = null;
+  $('in-game-hint').classList.add('hidden');
   document.body.classList.remove('playing');
   yt.pause();
   if (net.isHost) {

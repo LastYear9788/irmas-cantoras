@@ -1,14 +1,38 @@
-// Escolha do visual: "Novo" (bolhas + vidro líquido) ou "Clássico". Fica salvo no navegador.
-import { startBubbles, stopBubbles, pauseBubbles, freezeBubbles, onSlow } from './bubbles.js?v=17';
-import { enableLiquid, disableLiquid } from './liquid.js?v=17';
+// Escolha do visual: "Novo" (bolhas + vidro líquido) ou "Clássico", + controle do Modo Leve. Fica salvo no navegador.
+import { startBubbles, stopBubbles, pauseBubbles, freezeBubbles, unfreezeBubbles, onSlow } from './bubbles.js?v=18';
+import { enableLiquid, disableLiquid } from './liquid.js?v=18';
 
 const btn = document.getElementById('btn-theme');
+const btnLite = document.getElementById('btn-lite');
 let theme = localStorage.getItem('ic-theme') === 'classic' ? 'classic' : 'new';
 
-let lite = false;   // PC não aguentou o vidro líquido: fica só com o vidro normal (desde que abriu a página)
-// modo leve (PC fraco, detectado na hora ou de outra vez): sem vidro líquido e fundo parado
-const goLite = () => { lite = true; disableLiquid(); freezeBubbles(); document.documentElement.classList.add('still'); };
-if (document.documentElement.classList.contains('lite')) { lite = true; }
+let lite = document.documentElement.classList.contains('lite');
+const userForcedFull = () => { try { return localStorage.getItem('ic-lite') === '0'; } catch (e) { return false; } };
+
+function renderLiteBtn() {
+  if (!btnLite) return;
+  btnLite.textContent = lite ? '⚡ Modo leve: Ligado' : '⚡ Modo leve';
+  btnLite.title = lite ? 'Desligar modo leve (voltar efeitos completos)' : 'Ligar modo leve (menos efeitos, mais rápido em PC fraco)';
+  btnLite.classList.toggle('is-on', lite);
+}
+
+// modo leve (PC fraco, detectado na hora ou escolhido manualmente): sem vidro líquido e fundo parado
+const goLite = () => {
+  lite = true;
+  document.documentElement.classList.add('lite', 'still');
+  disableLiquid();
+  freezeBubbles();
+  renderLiteBtn();
+};
+
+const exitLite = () => {
+  lite = false;
+  document.documentElement.classList.remove('lite', 'still');
+  unfreezeBubbles();
+  apply();
+  renderLiteBtn();
+};
+
 addEventListener('ic-lite', goLite);
 
 function apply() {
@@ -23,13 +47,28 @@ btn.onclick = () => {
   localStorage.setItem('ic-theme', theme);
   apply();
 };
+
+if (btnLite) {
+  btnLite.onclick = () => {
+    if (lite) {
+      try { localStorage.setItem('ic-lite', '0'); } catch (e) { /* ok */ }
+      exitLite();
+    } else {
+      try { localStorage.setItem('ic-lite', '1'); } catch (e) { /* ok */ }
+      goLite();
+    }
+  };
+}
+
 apply();
+renderLiteBtn();
 
 // PC fraco: 1º desliga o vidro líquido (o que mais pesa); se ainda pesar, o fundo para de se mexer
+// (respeita se o usuário desligou o modo leve manualmente)
 onSlow((level) => {
-  if (level === 1) { lite = true; disableLiquid(); }
+  if (userForcedFull()) return;
+  if (level === 1) { lite = true; disableLiquid(); renderLiteBtn(); }
   else {
-    document.documentElement.classList.add('lite');
     try { localStorage.setItem('ic-lite', '1'); } catch (e) { /* ok */ }
     goLite();
   }

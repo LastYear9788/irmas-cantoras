@@ -27,7 +27,7 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-button, input, textarea { font: inherit; color: inherit; }
+button, input, textarea, select { font: inherit; color: inherit; }
 
 /* ---------- fundo com bolhas ---------- */
 .blobs { position: fixed; inset: 0; z-index: 0; overflow: hidden; }
@@ -204,10 +204,14 @@ main { position: relative; z-index: 2; min-height: 100vh; }
 .ly-next { font-size: 24px; color: rgba(255,255,255,0.45); }
 .ly-cur {
   font-size: clamp(28px, 4.5vw, 50px);
-  --p: 0%; --c: #fff;
-  background: linear-gradient(90deg, var(--c) var(--p), rgba(255,255,255,0.9) var(--p));
-  -webkit-background-clip: text; background-clip: text; color: transparent;
+  --c: #fff;
   filter: drop-shadow(0 2px 10px rgba(0,0,0,0.4));
+}
+.ly-word {
+  display: inline-block;
+  --wp: 0%;
+  background: linear-gradient(90deg, var(--c) var(--wp), rgba(255,255,255,0.92) var(--wp));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
 }
 .ly-tag { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.15em; min-height: 1.3em; color: var(--c, var(--muted)); }
 .ly-tag.small { font-size: 11px; opacity: 0.7; margin-top: 10px; }
@@ -246,6 +250,9 @@ main { position: relative; z-index: 2; min-height: 100vh; }
 }
 .toast.show { transform: translate(-50%, 0); opacity: 1; visibility: visible; }
 
+@media (max-width: 560px) {
+  .bars { grid-template-columns: 92px 1fr 38px; }
+}
 @media (max-width: 520px) {
   .card { padding: 22px; }
   .title { font-size: 32px; }
@@ -294,17 +301,18 @@ main { position: relative; z-index: 2; min-height: 100vh; }
 
 /* ---------- explicação da nota (lobby): rodapé ---------- */
 .score-foot { text-align: center; font-size: 13px; color: var(--muted); max-width: 900px; }
-.tip-word { position: relative; white-space: nowrap; cursor: default; border-bottom: 1px dotted rgba(255,255,255,0.35); }
-.tip-word::after {  /* balãozinho que aparece na hora (só existe com o mouse em cima: invisível ele "alargava" a página no celular) */
+.tip-word { position: relative; white-space: nowrap; cursor: default; border-bottom: 1px dotted rgba(255,255,255,0.35); outline: none; }
+.tip-word::after {  /* balãozinho que aparece na hora (só existe com o mouse/toque em cima: invisível ele "alargava" a página no celular) */
   content: attr(data-tip); position: absolute; left: 50%; bottom: calc(100% + 10px); z-index: 30;
   transform: translate(-50%, 6px); opacity: 0; pointer-events: none; display: none;
-  padding: 8px 12px; border-radius: 12px; white-space: nowrap; font-size: 13px; color: #fff;
-  background: rgba(30, 20, 50, 0.85); border: 1px solid rgba(255,255,255,0.2);
+  padding: 8px 12px; border-radius: 12px; font-size: 13px; color: #fff;
+  width: max-content; max-width: min(260px, 85vw); white-space: normal; text-align: center; line-height: 1.35;
+  background: rgba(30, 20, 50, 0.9); border: 1px solid rgba(255,255,255,0.2);
   -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
   box-shadow: 0 8px 24px rgba(0,0,0,0.35);
   transition: opacity 0.15s, transform 0.25s var(--spring);
 }
-.tip-word:hover::after { display: block; opacity: 1; transform: translate(-50%, 0); }
+.tip-word:hover::after, .tip-word:focus::after { display: block; opacity: 1; transform: translate(-50%, 0); }
 
 /* ---------- aviso de troca de vez ---------- */
 .lyrics-card.turn-soon { border-color: color-mix(in srgb, var(--sc) 80%, transparent); box-shadow: 0 0 50px color-mix(in srgb, var(--sc) 30%, transparent), inset 0 1px 0 rgba(255,255,255,0.45); }
@@ -366,7 +374,8 @@ main { position: relative; z-index: 2; min-height: 100vh; }
 .photo .p-name { font-weight: 700; color: var(--c, #fff); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .photo .p-label { color: var(--muted); white-space: nowrap; }
 .photo .p-actions { position: absolute; top: 6px; right: 6px; display: flex; gap: 4px; opacity: 0; transition: opacity 0.2s; }
-.photo:hover .p-actions { opacity: 1; }
+.photo:hover .p-actions, .photo:focus-within .p-actions { opacity: 1; }
+@media (hover: none) { .photo .p-actions { opacity: 1; } }
 .photo .p-actions a, .photo .p-actions button {
   width: 28px; height: 28px; border-radius: 50%; border: 0; cursor: pointer; display: grid; place-items: center;
   background: rgba(0,0,0,0.55); color: #fff; font-size: 14px; text-decoration: none;
@@ -433,11 +442,87 @@ main { position: relative; z-index: 2; min-height: 100vh; }
 }
 .liquid-on .liquid::before, .liquid-on .liquid::after { display: none; }   /* tira o reflexo diagonal antigo */
 
-/* botão de trocar o visual */
-.theme-btn { position: fixed; top: 12px; right: 12px; z-index: 15; padding: 7px 14px; font-size: 12px; opacity: 0.8; }
-.theme-btn:hover { opacity: 1; }
-body.playing .theme-btn { display: none; }
+/* botões de visual e modo leve no topo */
+.top-controls { position: fixed; top: 12px; right: 12px; z-index: 15; display: flex; gap: 8px; align-items: center; }
+.top-controls .btn { padding: 7px 13px; font-size: 12px; opacity: 0.85; }
+.top-controls .btn:hover { opacity: 1; }
+body.playing .top-controls { display: none; }
 @media (max-width: 760px) { .screen { padding-top: 56px; } }
+
+/* ---------- calibração e diagnóstico do microfone ---------- */
+.cal-home-row {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding-top: 12px; margin-top: 4px; border-top: 1px solid rgba(255,255,255,0.12);
+}
+.cal-open-btn { width: 100%; }
+.cal-badge { font-size: 12px; color: var(--muted); text-align: center; }
+.cal-badge.ok { color: #7cf29a; }
+.cal-badge.warn { color: #ffe3a3; }
+.cal-badge.bad { color: #ffb4c8; font-weight: 600; }
+
+.cal-tag { text-transform: none; letter-spacing: 0; font-weight: 600; margin-left: 6px; font-size: 11px; }
+.cal-tag.ok { color: #7cf29a; }
+.cal-tag.bad { color: #ffb4c8; }
+
+.cal-overlay { z-index: 25; padding: 16px; }
+.cal-card {
+  max-width: 500px; max-height: 92vh; overflow-y: auto; gap: 14px;
+  background: linear-gradient(135deg, rgba(28, 18, 52, 0.92), rgba(16, 10, 34, 0.94));
+}
+.cal-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.cal-title { font-size: 20px; font-weight: 800; }
+.cal-x {
+  width: 34px; height: 34px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.2);
+  background: rgba(255,255,255,0.08); cursor: pointer; font-size: 15px; flex: none;
+}
+.cal-x:hover { background: rgba(255,255,255,0.18); }
+.cal-meta { margin-top: -8px; font-size: 12px; min-height: 1em; }
+
+.cal-select { padding: 11px 14px; font-size: 14px; cursor: pointer; flex: 1; min-width: 0; }
+.cal-select option { background: #1c1234; color: #fff; }
+
+.cal-toggle {
+  display: flex; align-items: flex-start; gap: 12px; padding: 12px 14px; border-radius: 16px;
+  background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.14); cursor: pointer; text-align: left;
+}
+.cal-toggle input { width: 18px; height: 18px; margin-top: 2px; accent-color: var(--p0); flex: none; cursor: pointer; }
+.cal-toggle b { display: block; font-size: 14px; }
+.cal-toggle small { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; line-height: 1.35; }
+
+.cal-meter-block { display: flex; flex-direction: column; gap: 6px; }
+.cal-meter-labels { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); }
+.cal-meter { position: relative; height: 14px; overflow: visible; }
+.cal-meter .meter-fill { border-radius: 99px; }
+.cal-meter-th {
+  position: absolute; top: -3px; bottom: -3px; width: 3px; border-radius: 3px; left: 6%;
+  background: #fff; box-shadow: 0 0 8px rgba(255,255,255,0.85); pointer-events: none; transition: left 0.15s ease;
+}
+
+.cal-live {
+  padding: 12px 14px; border-radius: 16px; font-size: 14px; font-weight: 600; text-align: center; line-height: 1.35;
+  background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.16); color: var(--muted);
+  transition: border-color 0.2s, background 0.2s, color 0.2s;
+}
+.cal-live.ok { border-color: rgba(124,242,154,0.7); background: rgba(124,242,154,0.14); color: #c7ffd6; }
+.cal-live.info { border-color: rgba(79,179,255,0.6); background: rgba(79,179,255,0.12); color: #cde8ff; }
+.cal-live.warn { border-color: rgba(255,209,102,0.75); background: rgba(255,209,102,0.14); color: #ffe3a3; }
+.cal-live.bad { border-color: rgba(255,95,130,0.85); background: rgba(255,60,110,0.2); color: #ffd0dc; }
+
+.cal-progress-wrap { display: flex; flex-direction: column; gap: 8px; }
+.cal-step-text { font-size: 14px; font-weight: 700; text-align: center; color: #ffe08a; }
+
+.cal-checks { display: flex; flex-direction: column; gap: 8px; text-align: left; }
+.cal-check {
+  padding: 11px 13px; border-radius: 16px; font-size: 13px; line-height: 1.4;
+  background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.14);
+}
+.cal-check.ok { border-color: rgba(124,242,154,0.45); background: rgba(124,242,154,0.08); }
+.cal-check.warn { border-color: rgba(255,209,102,0.55); background: rgba(255,209,102,0.1); }
+.cal-check.bad { border-color: rgba(255,95,130,0.65); background: rgba(255,60,110,0.14); }
+.cal-check-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; font-size: 14px; }
+.cal-check p { color: rgba(255,255,255,0.8); }
+.cal-act { margin-top: 8px; }
+.cal-done-btn { align-self: center; min-width: 140px; }
 
 /* PC bem fraco (detectado sozinho): fundo parado */
 .still .blob { animation-play-state: paused; }

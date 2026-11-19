@@ -5,18 +5,19 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Irmãs Cantoras</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎤</text></svg>">
-  <link rel="stylesheet" href="css/glass.css?v=17">
+  <link rel="stylesheet" href="css/glass.css?v=18">
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <script>
     document.documentElement.classList.toggle('theme-new', localStorage.getItem('ic-theme') !== 'classic');
-    // PC fraco (poucos núcleos/memória, ou já pesou antes): começa no modo leve
+    // PC fraco (poucos núcleos/memória, ou já pesou antes): começa no modo leve, salvo se o usuário desligou manualmente ('0')
     try {
-      if (localStorage.getItem('ic-lite') === '1' || (navigator.hardwareConcurrency || 4) <= 2 || (navigator.deviceMemory && navigator.deviceMemory <= 2))
+      const savedLite = localStorage.getItem('ic-lite');
+      if (savedLite === '1' || (savedLite !== '0' && ((navigator.hardwareConcurrency || 4) <= 2 || (navigator.deviceMemory && navigator.deviceMemory <= 2))))
         document.documentElement.classList.add('lite');
     } catch (e) { /* ok */ }
   </script>
-  <script type="module" src="js/app.js?v=17"></script>
-  <script type="module" src="js/theme.js?v=17"></script>
+  <script type="module" src="js/app.js?v=18"></script>
+  <script type="module" src="js/theme.js?v=18"></script>
 </head>
 <body>
   <!-- Fundo animado (é o que dá vida ao vidro) -->
@@ -70,6 +71,11 @@
           <button id="btn-own-room" class="link">Não fui convidada, quero criar minha própria sala</button>
         </div>
 
+        <div class="cal-home-row">
+          <button id="btn-home-cal" class="btn btn-small cal-open-btn" type="button">🎙️ Testar e calibrar microfone</button>
+          <span id="cal-home-badge" class="cal-badge">Teste antes de começar pra evitar cortes na voz</span>
+        </div>
+
         <p id="home-msg" class="msg"></p>
       </div>
       <p class="footnote">Use Chrome ou Edge · Use fone de ouvido 🎧</p>
@@ -90,10 +96,11 @@
           <ul id="player-list" class="player-list"></ul>
           <p id="wait-hint" class="hint"></p>
 
-          <div class="label">Microfone</div>
+          <div class="label">Microfone <span id="cal-lobby-tag" class="cal-tag"></span></div>
           <div class="mic-box">
             <div class="meter"><div id="mic-meter" class="meter-fill"></div></div>
             <button id="btn-mic" class="btn btn-small">Ativar microfone</button>
+            <button id="btn-lobby-cal" class="btn btn-small" type="button" title="Escolher microfone, calibrar e detectar conflitos">🔧</button>
           </div>
           <p id="mic-msg" class="hint">Fale alguma coisa: a barra tem que mexer. Use fone de ouvido!</p>
 
@@ -108,6 +115,7 @@
         </div>
 
         <div class="card glass liquid">
+          <p id="in-game-hint" class="tip hidden">🎤 Já tem uma música rolando agora! Clique em "Estou pronta!" pra entrar na próxima.</p>
           <div class="label">Música</div>
           <div id="host-song-controls">
             <div class="row">
@@ -151,10 +159,10 @@
       </div>
       <p class="score-foot">
         🏆 A nota vai de 0 a 10.000 e soma
-        <span class="tip-word" data-tip="Cantar a linha inteira (respirar entre as frases pode!)">💨 Fôlego</span> ·
-        <span class="tip-word" data-tip="Notas certinhas e no tom da música (vibrato não atrapalha)">🎯 Afinação</span> ·
-        <span class="tip-word" data-tip="Voz limpa e firme, sem tremer">🎙️ Timbre</span> ·
-        <span class="tip-word" data-tip="Entrar na hora certa e cantar as sílabas da letra (não vale só “aaaa”)">⏱️ Ritmo</span>
+        <span class="tip-word" tabindex="0" data-tip="Cantar a linha inteira (respirar entre as frases pode!)">💨 Fôlego</span> ·
+        <span class="tip-word" tabindex="0" data-tip="Notas certinhas e no tom da música (vibrato não atrapalha)">🎯 Afinação</span> ·
+        <span class="tip-word" tabindex="0" data-tip="Voz limpa e firme, sem tremer">🎙️ Timbre</span> ·
+        <span class="tip-word" tabindex="0" data-tip="Entrar na hora certa e cantar as sílabas da letra (não vale só “aaaa”)">⏱️ Ritmo</span>
       </p>
     </section>
 
@@ -216,8 +224,8 @@
         <p id="result-tip" class="result-tip hidden"></p>
         <div id="rec-box" class="rec-box hidden">
           <button id="btn-rec-play" class="btn btn-primary">🎧 Ouvir minha gravação</button>
-          <a id="rec-download" class="link" download>💾 Guardar no PC</a>
-          <p id="rec-msg" class="hint center">Sua voz junto com a música, do começo ao fim. Só você escuta.</p>
+          <a id="rec-download" class="link" download>💾 Guardar só minha voz</a>
+          <p id="rec-msg" class="hint center">Ao ouvir aqui, sua voz toca junto com a música. O arquivo baixado salva só sua voz. Só você escuta.</p>
         </div>
         <p id="night-score" class="night-score hidden"></p>
         <div id="result-host" class="row center wrap">
@@ -233,7 +241,67 @@
     </section>
   </main>
 
-  <button id="btn-theme" class="btn btn-small theme-btn">🎨 Visual: Novo</button>
+  <div class="top-controls">
+    <button id="btn-lite" class="btn btn-small" type="button">⚡ Modo leve</button>
+    <button id="btn-theme" class="btn btn-small" type="button">🎨 Visual: Novo</button>
+  </div>
+
+  <!-- ============ MODAL: CALIBRAÇÃO DO MICROFONE ============ -->
+  <div id="cal-modal" class="overlay cal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="cal-title">
+    <div class="card glass cal-card">
+      <div class="cal-head">
+        <h2 id="cal-title" class="cal-title">🎙️ Calibração do Microfone</h2>
+        <button id="cal-close" class="cal-x" type="button" aria-label="Fechar">✕</button>
+      </div>
+      <p id="cal-meta" class="hint cal-meta"></p>
+
+      <label class="field">
+        <span>Microfone usado</span>
+        <div class="row">
+          <select id="cal-device" class="glass-input cal-select"><option value="">Padrão do sistema</option></select>
+          <button id="cal-restart" class="btn btn-small" type="button" title="Reiniciar conexão do microfone">🔄</button>
+        </div>
+      </label>
+
+      <label class="cal-toggle">
+        <input id="cal-raw" type="checkbox">
+        <span>
+          <b>🎧 Estou de fone (desligar filtros do navegador)</b>
+          <small>Evita que a voz corte no meio da música ou entre em conflito com o Discord. Só use com fone!</small>
+        </span>
+      </label>
+
+      <div class="cal-meter-block">
+        <div class="cal-meter-labels">
+          <span>Nível da voz</span>
+          <span class="hint">traço = corte de ruído</span>
+        </div>
+        <div class="meter cal-meter">
+          <div id="cal-meter-fill" class="meter-fill"></div>
+          <div id="cal-meter-th" class="cal-meter-th" title="Piso de ruído"></div>
+        </div>
+      </div>
+
+      <div id="cal-live-box" class="cal-live">
+        <span id="cal-live-text">🎤 Cante um "Aaaa" para testar o reconhecimento ao vivo</span>
+      </div>
+
+      <div id="cal-progress-wrap" class="cal-progress-wrap hidden">
+        <div id="cal-step-text" class="cal-step-text"></div>
+        <div class="meter"><div id="cal-progress-fill" class="meter-fill"></div></div>
+      </div>
+
+      <div class="row wrap center">
+        <button id="cal-run" class="btn btn-primary" type="button">✨ Calibrar automático (5s)</button>
+        <button id="cal-hear" class="btn btn-small" type="button">🎧 Testar me ouvir</button>
+      </div>
+
+      <div id="cal-checks" class="cal-checks hidden"></div>
+
+      <button id="cal-done" class="btn btn-small cal-done-btn" type="button">Fechar</button>
+    </div>
+  </div>
+
   <div id="toast" class="toast glass"></div>
 </body>
 </html>

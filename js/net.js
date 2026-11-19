@@ -34,6 +34,7 @@ function clientToken() {
 let peer = null;
 let hostConn = null;        // (convidada) conexão com a host
 const conns = new Map();    // (host) peerId -> conexão
+const tokens = new Map();   // (host) peerId -> token (privado, nunca enviado pras outras jogadoras)
 let clockOffset = 0;        // (convidada) relógio da host - meu relógio
 
 export const net = {
@@ -71,6 +72,7 @@ export const net = {
           net.isHost = true;
           net.myId = id;
           net.code = code;
+          tokens.clear();
           net.players = [{ id, name: cleanName(name), ready: false }];
           p.on('connection', onGuestConnection);
           p.on('disconnected', () => p.reconnect());
@@ -149,12 +151,19 @@ function deliver(msg) { emit(msg.type, msg); }
 function safeSend(c, msg) { try { if (c && c.open) c.send(msg); } catch (e) { console.warn(e); } }
 
 function pushPlayers() {
-  const msg = { type: 'players', players: net.players };
+  const pub = net.players.map(({ id, name, ready }) => ({ id, name, ready }));
+  const msg = { type: 'players', players: pub };
   for (const c of conns.values()) safeSend(c, msg);
-  emit('players', net.players);
+  emit('players', pub);
 }
 
 const ROOM_LIMIT = 10;   // proteção contra alguém lotar a sala com conexões falsas
+
+function findPeerByToken(token) {
+  if (!token) return null;
+  for (const [id, t] of tokens) if (t === token) return id;
+  return null;
+}
 
 function onGuestConnection(c) {
   c.on('data', (msg) => {
@@ -162,23 +171,25 @@ function onGuestConnection(c) {
     switch (msg.type) {
       case 'hello': {
         if (net.players.some((p) => p.id === c.peer)) break;          // "oi" repetido: ignora
-        if (net.players.length >= ROOM_LIMIT && !net.players.some((p) => p.token && p.token === String(msg.token || ''))) {
+        const token = String(msg.token || '').slice(0, 40);
+        const oldId = findPeerByToken(token);
+        if (net.players.length >= ROOM_LIMIT && !oldId) {
           safeSend(c, { type: 'full' });
           setTimeout(() => { try { c.close(); } catch (e) { /* ok */ } }, 500);
           break;
         }
         // voltou depois de um F5? (mesmo "crachá" do navegador) -> tira a versão antiga
-        const token = String(msg.token || '').slice(0, 40);
-        const old = token && net.players.find((p) => p.token === token);
-        if (old) {
-          const oc = conns.get(old.id);
-          conns.delete(old.id);
-          net.players = net.players.filter((p) => p.id !== old.id);
+        if (oldId) {
+          const oc = conns.get(oldId);
+          conns.delete(oldId);
+          tokens.delete(oldId);
+          net.players = net.players.filter((p) => p.id !== oldId);
           try { if (oc) oc.close(); } catch (e) { /* já fechou */ }
-          emit('guestreplaced', { oldId: old.id, newId: c.peer });
+          emit('guestreplaced', { oldId, newId: c.peer });
         }
         conns.set(c.peer, c);
-        net.players.push({ id: c.peer, name: uniqueName(cleanName(msg.name)), ready: false, token });
+        if (token) tokens.set(c.peer, token);
+        net.players.push({ id: c.peer, name: uniqueName(cleanName(msg.name)), ready: false });
         pushPlayers();
         emit('guestjoined', c.peer);
         break;
@@ -208,6 +219,7 @@ function onGuestConnection(c) {
   });
   watchConn(c, () => {
     conns.delete(c.peer);
+    tokens.delete(c.peer);
     const pl = net.players.find((p) => p.id === c.peer);
     net.players = net.players.filter((p) => p.id !== c.peer);
     pushPlayers();
@@ -218,7 +230,7 @@ function onGuestConnection(c) {
 
 /** nome limpo: sem caracteres invisíveis, sem espaços sobrando, até 16 letras */
 export function cleanName(x) {
-  const n = String(x || '').replace(/[ --​-‏‪-‮⁠-⁯]/g, '').replace(/\s+/g, ' ').trim();
+  const n = String(x || '').replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u206f]/g, '').replace(/\s+/g, ' ').trim();
   return [...n].slice(0, 16).join('') || 'Amiga';
 }
 /** duas com o mesmo nome? a segunda vira "Bia 2" */

@@ -26,8 +26,8 @@ const CONSONANT = 0.3;  // pausa menor que isso entre sons é consoante/respiro,
 
 /** quantas sílabas (grupos de vogais) tem a linha — serve pra saber quanto tempo ela leva e pro ritmo */
 export function syllables(text) {
-  const t = String(text || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
-  const cjk = (t.match(/[぀-ヿ㐀-鿿가-힯]/g) || []).length;
+  const t = String(text || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const cjk = (t.match(/[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/g) || []).length;
   return Math.max(1, (t.match(/[aeiouy]+/g) || []).length + cjk);
 }
 

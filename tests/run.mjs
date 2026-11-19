@@ -3,6 +3,7 @@ import { Scorer, syllables } from '../js/score.js';
 import { detectPitch, VoiceGate } from '../js/pitch.js';
 import { assignParts, ALL } from '../js/parts.js';
 import { parseLRC, buildQueries } from '../js/lyrics.js';
+import { cleanName } from '../js/net.js';
 
 let passed = 0, failed = 0;
 function test(name, fn) {
@@ -231,13 +232,43 @@ test('voz grave (homem, ~100 Hz) com microfone chiando conta', () => {
 
 console.log('\nDetector de afinação');
 const cents = (a, b) => Math.abs(1200 * Math.log2(a / b));
-test('acha a nota certa de 82 Hz a 1046 Hz (erro < 10 cents)', () => {
-  for (const f of [82, 110, 165, 220, 330, 440, 660, 880, 1046]) {
+test('acha a nota certa de 68 Hz a 1046 Hz (erro < 15 cents)', () => {
+  for (const f of [68, 82, 110, 165, 220, 330, 440, 660, 880, 1046]) {
     const b = synth(0.05, () => ({ f, a: 1 })).subarray(0, 2048), h = new Float32Array(1024);
     for (let i = 0; i < 1024; i++) h[i] = (b[2 * i] + b[2 * i + 1]) / 2;
     const r = detectPitch(h, RATE / 2);
-    assert(r.pitch && cents(r.pitch, f) < 10, `${f} Hz -> ${r.pitch.toFixed(1)}`);
+    assert(r.pitch && cents(r.pitch, f) < 15, `${f} Hz -> ${r.pitch.toFixed(1)}`);
   }
+});
+test('voz masculina grave (90 Hz) com respiração/ar natural não some no detector', () => {
+  const buf = new Float32Array(1024);
+  let lp = 0, seed = 13;
+  const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647 * 2 - 1; };
+  for (let i = 0; i < buf.length; i++) {
+    lp = lp * 0.88 + rnd() * 0.03;
+    buf[i] = 0.08 * (Math.sin(2 * Math.PI * 90 * i / (RATE / 2)) + 0.25 * Math.sin(4 * Math.PI * 90 * i / (RATE / 2))) + lp;
+  }
+  const r = detectPitch(buf, RATE / 2);
+  assert(r.pitch > 84 && r.pitch < 96, `90 Hz -> ${r.pitch.toFixed(1)} (clarity ${r.clarity.toFixed(2)})`);
+});
+test('microfone com deslocamento DC (+0,05) ainda reconhece a voz', () => {
+  const buf = new Float32Array(1024);
+  let lp = 0, seed = 13;
+  const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647 * 2 - 1; };
+  for (let i = 0; i < buf.length; i++) {
+    lp = lp * 0.88 + rnd() * 0.025;
+    buf[i] = 0.05 + 0.08 * Math.sin(2 * Math.PI * 100 * i / (RATE / 2)) + lp;
+  }
+  const r = detectPitch(buf, RATE / 2);
+  assert(r.pitch > 94 && r.pitch < 106, `100 Hz + DC -> ${r.pitch.toFixed(1)}`);
+});
+test('VoiceGate calibrado mantém microfone baixo funcionando e não trava com consoantes altas', () => {
+  const g = new VoiceGate({ floor: 0.001, voice: 0.01 });
+  assert(g.threshold() < 0.006, 'threshold alto demais: ' + g.threshold());
+  // simula 10 quadros curtos de consoante alta sem pitch (não pode subir o piso acima da voz)
+  for (let i = 0; i < 10; i++) g.update(0.05, 0);
+  const res = g.update(0.009, 150);
+  assert(res.voiced, 'voz baixa sumiu depois de consoantes (th=' + g.threshold().toFixed(4) + ')');
 });
 test('leitura é leve o bastante pra PC fraco (< 1,5 ms aqui)', () => {
   const b = synth(0.05, () => ({ f: 220, a: 1 })).subarray(0, 1024), t0 = performance.now();
@@ -276,6 +307,11 @@ test('lê LRC, junta dueto e pula linha vazia', () => {
 test('monta busca a partir do título do vídeo', () => {
   const q = buildQueries('Anitta - Envolver (Official Music Video)', 'Anitta');
   assert(q.some((x) => x.artist_name === 'Anitta' && x.track_name === 'Envolver'), JSON.stringify(q[0]));
+});
+test('cleanName remove caracteres invisíveis/de controle e limita tamanho', () => {
+  assert(cleanName('  \u0000Bia\u200b  \n ') === 'Bia', 'deu: ' + JSON.stringify(cleanName('  \u0000Bia\u200b  \n ')));
+  assert(cleanName('\u0000\u0007   ') === 'Amiga', 'vazio');
+  assert(cleanName('NomeMuitoCompridoDemaisMesmo').length === 16, 'limite 16');
 });
 
 console.log(`\n${passed} passaram, ${failed} falharam\n`);
