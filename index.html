@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Irmãs Cantoras</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎤</text></svg>">
-  <link rel="stylesheet" href="css/glass.css?v=19">
+  <link rel="stylesheet" href="css/glass.css?v=20">
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <script>
     document.documentElement.classList.toggle('theme-new', localStorage.getItem('ic-theme') !== 'classic');
@@ -16,8 +16,8 @@
         document.documentElement.classList.add('lite');
     } catch (e) { /* ok */ }
   </script>
-  <script type="module" src="js/app.js?v=19"></script>
-  <script type="module" src="js/theme.js?v=19"></script>
+  <script type="module" src="js/app.js?v=20"></script>
+  <script type="module" src="js/theme.js?v=20"></script>
 </head>
 <body>
   <!-- Fundo animado (é o que dá vida ao vidro) -->
@@ -245,6 +245,19 @@
   <div class="top-controls">
     <button id="btn-lite" class="btn btn-small" type="button">⚡ Modo leve</button>
     <button id="btn-theme" class="btn btn-small" type="button">🎨 Visual: Novo</button>
+  </div>
+
+  <!-- ============ PERGUNTA: ESTÁ DE FONE? (1ª vez que liga o microfone) ============ -->
+  <div id="phones-modal" class="overlay cal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="phones-title">
+    <div class="card glass phones-card">
+      <h2 id="phones-title" class="cal-title">🎧 Você está de fone de ouvido?</h2>
+      <p class="hint">De fone, o app ouve sua voz "pura", sem os filtros de chamada de vídeo do navegador, que podem abafar a voz no meio da música.</p>
+      <div class="phones-choices">
+        <button id="phones-yes" class="btn btn-primary" type="button">🎧 Sim, estou de fone</button>
+        <button id="phones-no" class="btn" type="button">🔊 Não, o som sai na caixa</button>
+      </div>
+      <p class="hint small">Não sabe? Escolha "caixa". Dá pra trocar depois em "Testar e calibrar microfone".</p>
+    </div>
   </div>
 
   <!-- ============ MODAL: CALIBRAÇÃO DO MICROFONE ============ -->

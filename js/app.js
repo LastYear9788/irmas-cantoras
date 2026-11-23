@@ -1,13 +1,13 @@
 // Irmãs Cantoras — fluxo do app (telas, lobby, jogo, resultado)
-import { net } from './net.js?v=19';
-import * as yt from './youtube.js?v=19';
-import { findLyrics } from './lyrics.js?v=19';
-import { assignParts, ALL } from './parts.js?v=19';
-import { mic } from './mic.js?v=19';
-import { Scorer } from './score.js?v=19';
-import { cam } from './cam.js?v=19';
-import { initCalibration, isCalibrationOpen, closeCalibration, renderBadges } from './calibrate.js?v=19';
-import { createLog, saveLog, lastLog, downloadLog } from './singlog.js?v=19';
+import { net } from './net.js?v=20';
+import * as yt from './youtube.js?v=20';
+import { findLyrics } from './lyrics.js?v=20';
+import { assignParts, ALL } from './parts.js?v=20';
+import { mic } from './mic.js?v=20';
+import { Scorer } from './score.js?v=20';
+import { cam } from './cam.js?v=20';
+import { initCalibration, isCalibrationOpen, closeCalibration, renderBadges } from './calibrate.js?v=20';
+import { createLog, saveLog, lastLog, downloadLog } from './singlog.js?v=20';
 
 const COLORS = ['#ff5fa2', '#4fb3ff', '#ffd166', '#7cf29a'];
 const ALL_COLOR = '#b388ff';
@@ -236,7 +236,7 @@ function syncMicUi() {
     $('btn-mic').disabled = true;
     const lbl = mic.label();
     $('mic-msg').textContent = lbl
-      ? `Usando: ${lbl.replace(/\s*\([0-9a-f]{4}:[0-9a-f]{4}\)\s*/gi, '')}. Fale algo: a barra tem que mexer! 🎧`
+      ? `Usando: ${lbl.replace(/\s*\([0-9a-f]{4}:[0-9a-f]{4}\)\s*/gi, '')}${mic.info().rawMode ? ' · 🎧 Modo Fone' : ''}. Fale algo: a barra tem que mexer! 🎧`
       : 'Fale alguma coisa: a barra tem que mexer. Use fone de ouvido! 🎧';
     $('mic-msg').style.color = '';
     meterLoop();
@@ -255,8 +255,39 @@ mic.onLost = () => {
   syncMicUi();
   if (state.ready) { state.ready = false; net.setReady(false); renderLobby(); }
 };
+/**
+ * 1ª vez que liga o microfone: pergunta se está de fone. De fone, liga o "Modo Fone"
+ * (sem cancelamento de eco / ganho automático do navegador): esses filtros de chamada
+ * de vídeo chegaram a abafar a voz por 30s seguidos no meio da música (relatório do Kude).
+ */
+const PHONES_KEY = 'ic-asked-phones';
+let phonesAsk = null;   // pergunta já aberta: quem chamar de novo espera a mesma resposta
+function askHeadphones() {
+  if (phonesAsk) return phonesAsk;
+  let asked = false;
+  try { asked = !!localStorage.getItem(PHONES_KEY); } catch (e) { asked = true; }
+  if (asked || mic.getConfig().rawMode) return Promise.resolve();
+  const modal = $('phones-modal');
+  modal.classList.remove('hidden');
+  phonesAsk = new Promise((resolve) => {
+    const pick = (phones) => {
+      phonesAsk = null;
+      try { localStorage.setItem(PHONES_KEY, phones ? 'fone' : 'caixa'); } catch (e) { /* ok */ }
+      mic.setConfig({ rawMode: phones });
+      modal.classList.add('hidden');
+      if (phones) toast('🎧 Modo Fone ligado: sua voz chega sem filtros', 4000);
+      resolve();
+    };
+    $('phones-yes').onclick = () => pick(true);
+    $('phones-no').onclick = () => pick(false);
+  });
+  return phonesAsk;
+}
+
 async function startMic() {
   try {
+    // no meio da música (fio soltou) não pergunta nada: só religa
+    if (!state.game || state.game.finished) await askHeadphones();
     await mic.start();
     syncMicUi();
     // religou no meio da música (o fio tinha soltado): volta a ouvir e a contar

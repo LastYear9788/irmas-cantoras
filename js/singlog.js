@@ -100,7 +100,17 @@ export function analyze(log) {
   out.push(`${n} leituras${log.truncated ? ' (cortado: música longa demais)' : ''}`);
 
   // por que não contou, nos momentos em que era a vez da pessoa e a música estava tocando
-  const why = { contou: 0, 'problema no microfone': 0, 'vídeo parado/carregando': 0, 'baixo demais (abaixo do corte)': 0, 'som sem nota (fala/ruído/clareza baixa)': 0 };
+  // "parado": no último ~1s o volume quase não variou (quase sempre < 1,6× o mínimo). Voz cantando sobe e desce
+  // a cada sílaba; ruído de fundo fica parado. Separa "não chegou voz nenhuma" de "voz baixa".
+  const flat = new Uint8Array(n);
+  // (usa 15% e 85% da janela: um estalo rápido no meio não estraga a conta)
+  for (let i = 0; i < n; i++) {
+    const win = c.rms.slice(Math.max(0, i - 12), Math.min(n, i + 13)).sort((x, y) => x - y);
+    const lo = win[Math.floor(win.length * 0.15)], hi = win[Math.floor(win.length * 0.85)];
+    flat[i] = hi < Math.max(1, lo) * 1.6 ? 1 : 0;
+  }
+  const NOVOICE = 'nenhuma voz chegou (só ruído de fundo parado)';
+  const why = { contou: 0, 'problema no microfone': 0, 'vídeo parado/carregando': 0, [NOVOICE]: 0, 'voz baixa demais (abaixo do corte)': 0, 'som sem nota (fala/ruído/clareza baixa)': 0 };
   const quietRms = [], quietTh = [], noisyClar = [];
   let mineMs = 0, gaps = 0, maxGap = 0;
   for (let i = 0; i < n; i++) {
@@ -111,19 +121,21 @@ export function analyze(log) {
     if (c.pr[i]) why['problema no microfone'] += w;
     else if (c.yt[i] !== 1) why['vídeo parado/carregando'] += w;
     else if (c.v[i]) why.contou += w;
-    else if (!c.ld[i]) { why['baixo demais (abaixo do corte)'] += w; if (c.rms[i] > 0) { quietRms.push(c.rms[i]); quietTh.push(c.th[i]); } }
+    else if (!c.ld[i] && flat[i]) why[NOVOICE] += w;
+    else if (!c.ld[i]) { why['voz baixa demais (abaixo do corte)'] += w; if (c.rms[i] > 0) { quietRms.push(c.rms[i]); quietTh.push(c.th[i]); } }
     else { why['som sem nota (fala/ruído/clareza baixa)'] += w; noisyClar.push(c.c[i]); }
   }
   out.push('');
   out.push(`Na vez dela (${(mineMs / 1000).toFixed(0)}s):`);
   for (const k in why) if (why[k]) out.push(`  ${k.padEnd(40)} ${pct(why[k] / Math.max(1, mineMs)).padStart(4)}  (${(why[k] / 1000).toFixed(1)}s)`);
-  if (quietRms.length) out.push(`  → quando ficou "baixo": volume típico ${med(quietRms)} vs corte ${med(quietTh)} (×10000). Se o volume é perto do corte, o corte subiu ou o mic está baixo.`);
+  if (why[NOVOICE] > 3000) out.push('  → "nenhuma voz chegou": o microfone estava ligado (dá pra ver o ruído de fundo), mas a voz não apareceu. Ou a pessoa não cantou, ou algo calou a voz antes do app (cancelamento de eco com caixa de som, mudo no fone, outro programa).');
+  if (quietRms.length) out.push(`  → quando ficou "baixo": volume típico ${med(quietRms)} vs corte ${med(quietTh)} (×10000). Inclui as pausas normais entre sílabas e respiros; só preocupa se for muito tempo.`);
   if (noisyClar.length) out.push(`  → quando foi "som sem nota": clareza típica ${med(noisyClar)}% (precisa de ~55%+). Pode ser fala, eco, supressor de ruído ou mic distorcendo.`);
   if (gaps) out.push(`  ⚠️ ${gaps} travadas do PC (leitura atrasou mais de 200ms; maior: ${maxGap}ms)`);
 
   // linha do tempo em blocos de 10s
   out.push('');
-  out.push('Linha do tempo (só a vez dela):  início | contou | volume | corte | ruído | clareza | vídeo | problema');
+  out.push('Linha do tempo (só a vez dela):  início | na música | contou | sem voz | volume | corte | ruído | clareza | vídeo | problema');
   const B = 10000;
   let b0 = 0;
   while (n && b0 <= c.t[n - 1]) {
@@ -134,7 +146,9 @@ export function analyze(log) {
       const probs = [...new Set(idx.map((i) => c.pr[i]).filter(Boolean))].join(',');
       const yts = [...new Set(idx.map((i) => c.yt[i]))].join(',');
       const flag = v < 0.3 ? '  ◀ quase não contou' : '';
-      out.push(`  ${String(Math.round(b0 / 1000)).padStart(4)}s | ${pct(v).padStart(4)} | ${String(med(idx.map((i) => c.rms[i]))).padStart(5)} | ${String(med(idx.map((i) => c.th[i]))).padStart(4)} | ${String(med(idx.map((i) => c.fl[i]))).padStart(4)} | ${String(med(idx.map((i) => c.c[i]))).padStart(3)}% | ${yts.padEnd(5)} | ${probs}${flag}`);
+      const fv = idx.filter((i) => flat[i] && !c.ld[i]).length / idx.length;
+      const mt = c.lt[idx[0]], mm = `${Math.floor(Math.max(0, mt) / 60)}:${String(Math.floor(Math.max(0, mt) % 60)).padStart(2, '0')}`;
+      out.push(`  ${String(Math.round(b0 / 1000)).padStart(4)}s | ${mm.padStart(9)} | ${pct(v).padStart(4)} | ${pct(fv).padStart(5)} | ${String(med(idx.map((i) => c.rms[i]))).padStart(5)} | ${String(med(idx.map((i) => c.th[i]))).padStart(4)} | ${String(med(idx.map((i) => c.fl[i]))).padStart(4)} | ${String(med(idx.map((i) => c.c[i]))).padStart(3)}% | ${yts.padEnd(5)} | ${probs}${flag}`);
     }
     b0 += B;
   }

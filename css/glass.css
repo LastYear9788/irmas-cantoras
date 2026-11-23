@@ -466,6 +466,9 @@ body.playing .top-controls { display: none; }
 .cal-tag.bad { color: #ffb4c8; }
 
 .cal-overlay { z-index: 25; padding: 16px; }
+.phones-card { max-width: 440px; width: 100%; padding: 22px; text-align: center; display: flex; flex-direction: column; gap: 12px; }
+.phones-choices { display: flex; flex-direction: column; gap: 8px; }
+.phones-card .small { font-size: 12px; }
 .cal-card {
   max-width: 500px; max-height: 92vh; overflow-y: auto; gap: 14px;
   background: linear-gradient(135deg, rgba(28, 18, 52, 0.92), rgba(16, 10, 34, 0.94));

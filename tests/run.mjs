@@ -325,7 +325,9 @@ test('relatório registra, vira JSON e a análise acha o momento que parou de co
   const log = createLog({ version: 'teste', song: { title: 'Música' } }, () => now);
   for (let k = 0; k < 1500; k++, now += 40) {   // 60s a 25x/s; depois de 30s o corte sobe acima da voz
     const late = k > 750;
-    log.tick({ lt: k * 0.04, active: 0, mine: true, yt: 1, dt: 0.04, rms: 0.03, threshold: late ? 0.035 : 0.01, floor: 0.004,
+    // voz de verdade sobe e desce; nos últimos 10s, só ruído parado (não chegou voz)
+    const rms = k > 1250 ? 0.006 : k % 10 < 5 ? 0.033 : 0.015;
+    log.tick({ lt: k * 0.04, active: 0, mine: true, yt: 1, dt: 0.04, rms, threshold: late ? 0.035 : 0.01, floor: 0.004,
       peak: 0.1, rawPitch: 220, rawClarity: 0.9, voiced: !late, loud: !late, problem: null, src: 'main' });
   }
   log.event('aviso', 'quiet');
@@ -333,7 +335,8 @@ test('relatório registra, vira JSON e a análise acha o momento que parou de co
   const back = JSON.parse(JSON.stringify(log));
   assert(back.rows === 1500 && back.cols.rms.length === 1500 && !back.tick, 'JSON errado');
   const txt = analyze(back);
-  assert(/baixo demais/.test(txt) && /quase não contou/.test(txt) && /volume típico 300 vs corte 350/.test(txt), txt);
+  assert(/voz baixa demais/.test(txt) && /quase não contou/.test(txt) && /volume típico \d+ vs corte 350/.test(txt), txt);
+  assert(/parado\)\s+1[67]%/.test(txt), txt);
 });
 
 console.log('\nDivisão das partes');
