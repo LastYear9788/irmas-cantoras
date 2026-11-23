@@ -6,7 +6,7 @@ let box = null, list = [], raf = 0, last = 0, running = false;
 let W = 0, H = 0;
 let paused = false, frozen = false;
 // medidor de fôlego do PC: se ficar abaixo de ~45 quadros por segundo, avisa (modo leve)
-let slowCb = null, perfStart = 0, perfSum = 0, perfN = 0, slowLevel = 0;
+let slowCb = null, perfStart = 0, perfSum = 0, perfN = 0, perfSq = 0, slowLevel = 0;
 const mouse = { x: -1e4, y: -1e4, vx: 0, vy: 0, has: false };
 let resizeT = 0;
 const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -114,10 +114,13 @@ function checkPerf(now, gap) {
   if (slowLevel >= 2 || !slowCb) return;
   if (!perfStart) { perfStart = now + 1200; return; }     // ignora o comecinho (carregando)
   if (now < perfStart || gap > 250) return;               // aba escondida / travada de propósito não conta
-  perfSum += gap; perfN++;
+  perfSum += gap; perfSq += gap * gap; perfN++;
   if (now - perfStart > 2000) {
-    if (perfSum / perfN > 22) { slowLevel++; slowCb(slowLevel); }
-    perfStart = now; perfSum = 0; perfN = 0;
+    const mean = perfSum / perfN, sd = Math.sqrt(Math.max(0, perfSq / perfN - mean * mean));
+    // tela de 30 Hz (notebook economizando bateria) dá quadros certinhos de 33 ms: isso não é PC fraco
+    const steadyLowRefresh = sd < 2.5 && mean < 36;
+    if (mean > 22 && !steadyLowRefresh) { slowLevel++; slowCb(slowLevel); }
+    perfStart = now; perfSum = 0; perfSq = 0; perfN = 0;
   }
 }
 
@@ -130,7 +133,7 @@ export function pauseBubbles(p) {
   if (!running || paused === p || reduced()) { paused = p; return; }
   paused = p;
   if (p) cancelAnimationFrame(raf);
-  else { last = 0; perfStart = 0; perfSum = 0; perfN = 0; raf = requestAnimationFrame(step); }
+  else { last = 0; perfStart = 0; perfSum = 0; perfSq = 0; perfN = 0; raf = requestAnimationFrame(step); }
 }
 
 /** PC bem fraco: bolhas ficam paradas de vez. */

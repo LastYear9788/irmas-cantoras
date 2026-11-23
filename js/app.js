@@ -1,20 +1,28 @@
 // Irmãs Cantoras — fluxo do app (telas, lobby, jogo, resultado)
-import { net } from './net.js?v=22';
-import * as yt from './youtube.js?v=22';
-import { findLyrics } from './lyrics.js?v=22';
-import { assignParts, ALL } from './parts.js?v=22';
-import { mic } from './mic.js?v=22';
-import { Scorer } from './score.js?v=22';
-import { cam } from './cam.js?v=22';
-import { initCalibration, isCalibrationOpen, closeCalibration, renderBadges } from './calibrate.js?v=22';
-import { createLog, saveLog, lastLog, downloadLog } from './singlog.js?v=22';
-import { AV_OPTIONS, sanitizeAvatar, randomAvatar, loadMyAvatar, saveMyAvatar, avatarsEnabled, setAvatarsEnabled, vowelAt, loadThree, AvatarStage } from './avatar.js?v=22';
+import { net } from './net.js?v=23';
+import * as yt from './youtube.js?v=23';
+import { findLyrics } from './lyrics.js?v=23';
+import { assignParts, ALL } from './parts.js?v=23';
+import { mic } from './mic.js?v=23';
+import { Scorer } from './score.js?v=23';
+import { cam } from './cam.js?v=23';
+import { initCalibration, isCalibrationOpen, closeCalibration, renderBadges, stopCalHear } from './calibrate.js?v=23';
+import { createLog, saveLog, lastLog, downloadLog } from './singlog.js?v=23';
+import { trapFocus, releaseFocus } from './a11y.js?v=23';
+import { AV_OPTIONS, sanitizeAvatar, randomAvatar, loadMyAvatar, saveMyAvatar, avatarsEnabled, setAvatarsEnabled, vowelAt, loadThree, AvatarStage } from './avatar.js?v=23';
 
 const COLORS = ['#ff5fa2', '#4fb3ff', '#ffd166', '#7cf29a'];
 const ALL_COLOR = '#b388ff';
 const colorOf = (i) => (i === ALL ? ALL_COLOR : COLORS[i % COLORS.length]);
 
 const $ = (id) => document.getElementById(id);
+// armazenamento do navegador sem quebrar o app (cookies bloqueados, aba anônima, espaço cheio)
+const storeOf = (kind) => ({
+  get(k) { try { return window[kind].getItem(k); } catch (e) { return null; } },
+  set(k, v) { try { window[kind].setItem(k, v); } catch (e) { /* ok */ } },
+  del(k) { try { window[kind].removeItem(k); } catch (e) { /* ok */ } },
+});
+const local = storeOf('localStorage'), session = storeOf('sessionStorage');
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 const state = {
@@ -54,10 +62,10 @@ function toast(text, ms = 3500) {
    ============================================================ */
 const params = new URLSearchParams(location.search);
 const fromLink = (params.get('sala') || '').toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4);
-const lastRoom = (sessionStorage.getItem('ic-room') || '').replace(/[^A-Z]/g, '').slice(0, 4);
+const lastRoom = (session.get('ic-room') || '').replace(/[^A-Z]/g, '').slice(0, 4);
 const inviteCode = fromLink.length === 4 ? fromLink : lastRoom;
 const isRejoin = fromLink.length !== 4 && lastRoom.length === 4;
-$('in-name').value = localStorage.getItem('ic-name') || '';
+$('in-name').value = local.get('ic-name') || '';
 
 /** mostra só um "caminho" por vez: escolher / digitar código / convite */
 function homeMode(mode) {
@@ -84,7 +92,7 @@ function getName() {
     el.focus();
     return null;
   }
-  localStorage.setItem('ic-name', n);
+  local.set('ic-name', n);
   return n;
 }
 
@@ -126,7 +134,7 @@ $('btn-show-join').onclick = () => { if (getName()) homeMode('join'); };
 $('btn-back').onclick = () => homeMode('choose');
 $('btn-join').onclick = () => doJoin($('in-code').value.trim().toUpperCase());
 $('btn-invite-join').onclick = () => doJoin(inviteCode);
-$('btn-own-room').onclick = () => { history.replaceState(null, '', location.pathname); sessionStorage.removeItem('ic-room'); homeMode('choose'); };
+$('btn-own-room').onclick = () => { history.replaceState(null, '', location.pathname); session.del('ic-room'); homeMode('choose'); };
 
 // código: só letras, maiúsculas; com 4 letras + Enter já entra
 $('in-code').addEventListener('input', (e) => { e.target.value = e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 4); });
@@ -153,7 +161,7 @@ function enterLobby() {
   $('result-host').classList.toggle('hidden', !net.isHost);
   $('result-guest').classList.toggle('hidden', net.isHost);
   history.replaceState(null, '', location.pathname);
-  if (!net.isHost) sessionStorage.setItem('ic-room', net.code); else sessionStorage.removeItem('ic-room');
+  if (!net.isHost) session.set('ic-room', net.code); else session.del('ic-room');
   syncMicUi();
   renderMode();
   renderLobby();
@@ -172,7 +180,7 @@ function renderLobby() {
     <li style="color:${colorOf(i)}">
       <span class="dot"></span>
       <span class="pname" style="color:var(--text)">${esc(p.name)} ${p.id === net.myId ? '<span class="you">(você)</span>' : ''}</span>
-      ${state.wins[p.id] ? `<span class="wins" title="Vitórias hoje">🏆 ${state.wins[p.id]}</span>` : ''}
+      ${state.wins[p.id] ? `<span class="wins" title="Vitórias hoje">🏆 ${Number(state.wins[p.id]) || 0}</span>` : ''}
       <span class="status ${p.ready ? 'ok' : ''}">${p.ready ? 'Pronta ✓' : 'Esperando…'}</span>
     </li>`).join('');
 
@@ -213,9 +221,10 @@ net.on('guestjoined', () => {
 net.on('guestleft', (p) => toast(`${p.name} saiu da sala.`));
 net.on('guestreplaced', ({ oldId, newId }) => {
   if (state.wins[oldId]) { state.wins[newId] = state.wins[oldId]; delete state.wins[oldId]; }
+  state.pending.forEach((p) => { if (p.byId === oldId) p.byId = newId; });   // o aviso de aprovada/recusada chega nela
 });
 let leaving = false;
-function leaveAndReload() { leaving = true; sessionStorage.removeItem('ic-room'); location.reload(); }
+function leaveAndReload() { leaving = true; session.del('ic-room'); location.reload(); }
 window.addEventListener('beforeunload', (e) => {
   if (net.code && !leaving) { e.preventDefault(); e.returnValue = ''; }   // "Tem certeza que quer sair?"
 });
@@ -257,7 +266,8 @@ mic.onLost = () => {
   logEv('micLost');
   toast('O microfone desconectou! Conecta de novo e clica em "Ativar microfone" 🎤', 6000);
   syncMicUi();
-  if (state.ready) { state.ready = false; net.setReady(false); renderLobby(); }
+  // lembra que estava pronta: ao religar o mic volta a ficar (na tela de Resultado não tem o botão "Estou pronta!")
+  if (state.ready) { state.ready = false; state.readyLostByMic = true; net.setReady(false); renderLobby(); }
 };
 /**
  * 1ª vez que liga o microfone: pergunta se está de fone. De fone, liga o "Modo Fone"
@@ -273,12 +283,14 @@ function askHeadphones() {
   if (asked || mic.getConfig().rawMode) return Promise.resolve();
   const modal = $('phones-modal');
   modal.classList.remove('hidden');
+  trapFocus(modal, $('phones-yes'));
   phonesAsk = new Promise((resolve) => {
     const pick = (phones) => {
       phonesAsk = null;
       try { localStorage.setItem(PHONES_KEY, phones ? 'fone' : 'caixa'); } catch (e) { /* ok */ }
       mic.setConfig({ rawMode: phones });
       modal.classList.add('hidden');
+      releaseFocus(modal);
       if (phones) toast('🎧 Modo Fone ligado: sua voz chega sem filtros', 4000);
       resolve();
     };
@@ -294,6 +306,10 @@ async function startMic() {
     if (!state.game || state.game.finished) await askHeadphones();
     await mic.start();
     syncMicUi();
+    if (state.readyLostByMic) {
+      state.readyLostByMic = false;
+      if (!state.ready) { state.ready = true; net.setReady(true); renderLobby(); }
+    }
     // religou no meio da música (o fio tinha soltado): volta a ouvir e a contar
     const g = state.game;
     if (g && !g.finished && g.myIndex >= 0) mic.monitor(hearMe);
@@ -331,9 +347,11 @@ function meterTick() {
 
 $('btn-ready').onclick = async () => {
   if (!state.ready && !mic.active) {
+    state.readyLostByMic = false;   // quem decide aqui é o clique (senão o startMic marcava e o clique desmarcava)
     if (!(await startMic())) { toast('Precisa ligar o microfone pra jogar 🎤'); return; }
   }
   state.ready = !state.ready;
+  state.readyLostByMic = false;
   net.setReady(state.ready);
   renderLobby();
 };
@@ -414,7 +432,7 @@ function renderPending() {
   $('pending-box').classList.toggle('hidden', !state.pending.length);
   $('pending-list').innerHTML = state.pending.map((q) => `
     <li>
-      <img src="${yt.thumbUrl(q.videoId)}" alt="">
+      <img src="${esc(yt.thumbUrl(q.videoId))}" alt="">
       <div class="q-info"><div class="q-title">${esc(q.title)}</div><div class="q-by">sugerida por ${esc(q.by)}</div></div>
       ${net.isHost
         ? `<div class="q-actions"><button class="q-ok" data-sid="${esc(q.sid)}" title="Aprovar: vai pra playlist">✓ Aprovar</button><button class="q-no" data-sid="${esc(q.sid)}" title="Recusar">✕</button></div>`
@@ -438,12 +456,28 @@ function enqueue(id, by, title = 'Vídeo do YouTube') {
 }
 
 // nome do vídeo só pra mostrar na fila (se não conseguir, fica "Vídeo do YouTube")
-async function fetchTitle(item) {
-  try {
-    const r = await fetch('https://noembed.com/embed?url=' + encodeURIComponent('https://www.youtube.com/watch?v=' + item.videoId));
-    const d = await r.json();
-    if (d && d.title) { item.title = d.title; broadcastSetup(); }
-  } catch (e) { /* tudo bem */ }
+// (um pedido por vídeo: aprovar uma sugestão enquanto o nome ainda chega não pede de novo)
+const titleReq = new Map();
+function fetchTitle(item) {
+  let p = titleReq.get(item.videoId);
+  if (!p) {
+    const opts = typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? { signal: AbortSignal.timeout(8000) } : {};
+    p = fetch('https://noembed.com/embed?url=' + encodeURIComponent('https://www.youtube.com/watch?v=' + item.videoId), opts)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => (d && typeof d.title === 'string' && d.title.trim() ? d.title.trim().slice(0, 150) : null))
+      .catch(() => null);
+    titleReq.set(item.videoId, p);
+    p.then((t) => { if (!t) titleReq.delete(item.videoId); });   // não achou: deixa tentar de novo depois
+  }
+  p.then((t) => {
+    if (!t || item.title !== 'Vídeo do YouTube') return;
+    // a sugestão foi aprovada (virou outro item) ou recusada: quem ainda está na tela é que recebe o nome
+    const live = state.queue.find((q) => q.videoId === item.videoId && q.title === 'Vídeo do YouTube')
+      || (state.pending.includes(item) ? item : null);
+    if (!live) return;
+    live.title = t;
+    broadcastSetup();
+  });
 }
 
 /** (dona da sala) sem música atual? puxa a próxima da fila */
@@ -455,7 +489,10 @@ function maybeLoadNext() {
 }
 
 let loadingId = null;
+let loadSeq = 0;   // cada carregamento tem seu número: um antigo (pulado) nunca mexe no atual, mesmo se for o mesmo vídeo
 async function loadSong(id) {
+  const my = ++loadSeq;
+  const stale = () => my !== loadSeq;
   loadingId = id;
   state.song = null;
   broadcastSetup();
@@ -464,20 +501,21 @@ async function loadSong(id) {
   let ok = false;
   try {
     const info = await yt.prepare(id);
-    if (loadingId !== id) return;
+    if (stale()) return;
     state.preparedId = id;
     songCard(id, info.title, 'Procurando a letra… 🔎', '');
     const ly = await findLyrics(info.title, info.author, info.duration);
-    if (loadingId !== id) return;
+    if (stale()) return;
     state.song = { videoId: id, title: info.title, lines: ly.lines, artist: ly.artist, track: ly.track };
     if (ly.diff > 8) songCard(id, info.title, `Letra encontrada ✓ (${songName(ly)}). ⚠️ Esse vídeo tem partes a mais que a música, a letra pode ficar fora do tempo. Se der, usa o link do "áudio oficial".`, 'ok');
     else songCard(id, info.title, `Letra encontrada ✓ (${songName(ly)})`, 'ok');
     ok = true;
   } catch (e) {
-    if (loadingId !== id) return;
-    songCard(id, $('song-title').textContent, e.message, 'bad');
+    if (stale()) return;
+    const t = $('song-title').textContent;
+    songCard(id, t === 'Carregando…' ? 'Vídeo do YouTube' : t, e.message, 'bad');
   } finally {
-    if (loadingId === id) loadingId = null;
+    if (!stale()) loadingId = null;
     renderLobby();
   }
 
@@ -501,6 +539,7 @@ async function loadSong(id) {
 $('btn-skip').onclick = () => {
   if (!net.isHost || state.game) return;
   loadingId = null;
+  loadSeq++;          // o carregamento em andamento (se tiver) vira "velho" e para de mexer na tela
   state.song = null;
   $('song-card').classList.add('hidden');
   broadcastSetup();
@@ -512,7 +551,7 @@ function renderQueue() {
   $('queue-box').classList.toggle('hidden', !state.queue.length);
   $('queue-list').innerHTML = state.queue.map((q, i) => `
     <li>
-      <img src="${yt.thumbUrl(q.videoId)}" alt="">
+      <img src="${esc(yt.thumbUrl(q.videoId))}" alt="">
       <div class="q-info"><div class="q-title">${esc(q.title)}</div><div class="q-by">por ${esc(q.by)}</div></div>
       ${net.isHost ? `<button class="q-del" data-i="${i}" title="Tirar da fila">✕</button>` : ''}
     </li>`).join('');
@@ -546,11 +585,17 @@ function broadcastSetup() {
 }
 
 /* ---------- música (convidada) ---------- */
+let guestPreparing = null;   // (convidada) vídeo que está sendo preparado agora
 net.on('setup', async (msg) => {
   state.mode = msg.mode;
-  state.queue = msg.queue || [];
-  state.pending = Array.isArray(msg.pending) ? msg.pending : [];
-  state.wins = Object.assign(Object.create(null), msg.wins || {});
+  // o que vem pela rede vai parar no HTML: só aceita ID de vídeo de verdade e vitória que é número
+  const okItem = (q) => !!q && typeof q === 'object' && /^[\w-]{11}$/.test(q.videoId);
+  state.queue = Array.isArray(msg.queue) ? msg.queue.filter(okItem) : [];
+  state.pending = Array.isArray(msg.pending) ? msg.pending.filter(okItem) : [];
+  state.wins = Object.create(null);
+  if (msg.wins && typeof msg.wins === 'object') {
+    for (const [id, n] of Object.entries(msg.wins)) { const v = Math.floor(Number(n)); if (v > 0 && v < 1000) state.wins[id] = v; }
+  }
   renderMode();
   renderQueue();
   renderPending();
@@ -565,15 +610,24 @@ net.on('setup', async (msg) => {
   const s = state.song;
   if (state.preparedId === s.videoId) {
     songCard(s.videoId, s.title, `Letra encontrada ✓ (${songName(s)})`, 'ok');
+  } else if (guestPreparing === s.videoId) {
+    // já estou carregando esse vídeo (a dona só mudou outra coisa, tipo o modo ou a fila): não recomeça
+    renderLobby();
+    return;
   } else {
     songCard(s.videoId, s.title, 'Preparando o vídeo…', '');
+    guestPreparing = s.videoId;
+    const gone = () => !state.song || state.song.videoId !== s.videoId;   // a dona pulou essa música no meio
     try {
       await yt.prepare(s.videoId);
+      if (gone()) return;
       state.preparedId = s.videoId;
       songCard(s.videoId, s.title, `Letra encontrada ✓ (${songName(s)})`, 'ok');
     } catch (e) {
-      if (e.message === 'cancelado') return;
+      if (e.message === 'cancelado' || gone()) return;
       songCard(s.videoId, s.title, e.message, 'bad');
+    } finally {
+      if (guestPreparing === s.videoId) guestPreparing = null;
     }
   }
   renderLobby();
@@ -621,6 +675,8 @@ function startRound() {
 net.on('start', async (msg) => {
   if (!state.song) return;
   closeCalibration();
+  closeAvatarModal();
+  resetFpsWatch();
   $('in-game-hint').classList.add('hidden');
   state.round = msg.round;
   state.finals = Object.create(null);
@@ -658,7 +714,9 @@ net.on('start', async (msg) => {
 
   yt.rewind();
   if (state.preparedId !== state.song.videoId) {
+    const g = state.game;
     try { await yt.prepare(state.song.videoId); state.preparedId = state.song.videoId; } catch (e) { toast(e.message, 6000); }
+    if (state.game !== g || g.finished) return;              // encerraram/trocaram a rodada enquanto o vídeo carregava
   }
   countdown(msg.round);
   gameLoop(msg.round);
@@ -670,7 +728,8 @@ function countdown(round) {
   const ov = $('countdown');
   ov.classList.remove('hidden');
   const tick = () => {
-    if (!state.game || state.game.round !== round) return ov.classList.add('hidden');
+    // "Encerrar" durante a contagem: não pode dar play nem começar a gravar na tela de Resultado
+    if (state.game !== g || g.round !== round || g.finished) return ov.classList.add('hidden');
     const left = g.at - net.hostNow();
     if (left <= 0) {
       ov.classList.add('hidden');
@@ -718,7 +777,8 @@ function heartbeat(round) {
 function syncVideo(g) {
   if (!g.started || g.finished) return;
   const expected = (net.hostNow() - g.at) / 1000;   // onde o vídeo deveria estar
-  if (expected < 0 || expected > yt.duration()) return;
+  const dur = yt.duration();   // 0 = ainda não carregou: mesmo assim dá pra acertar o tempo
+  if (expected < 0 || (dur > 0 && expected > dur)) return;
   const st = yt.state();
   if (st === 1) g.sawPlaying = true;
   if (st === 3 || st === 0) return;                  // carregando: espera / terminou: não recomeça
@@ -750,14 +810,17 @@ function syncVideo(g) {
 function checkEnd(g) {
   if (!g.started) return;
   const last = g.lines[g.lines.length - 1];
-  // "terminou" só vale se o vídeo chegou a tocar nesta rodada (senão é o fim da rodada anterior)
-  if ((yt.state() === 0 && g.sawPlaying) || yt.time() - g.shift > last.end + 6) finishRound();
+  // "terminou" (pelo estado OU pelo tempo) só vale se o vídeo chegou a tocar nesta rodada:
+  // logo depois da revanche o YouTube ainda pode informar o tempo do fim da rodada anterior
+  if (!g.sawPlaying) return;
+  if (yt.state() === 0 || yt.time() - g.shift > last.end + 6) finishRound();
 }
 
 // voltou pra janela? acerta o tempo na hora
 document.addEventListener('visibilitychange', () => {
   logEv(document.hidden ? 'hidden' : 'visible');
   if (document.hidden && state.game && state.game.log) saveLog(state.game.log);
+  if (!document.hidden) resetFpsWatch();
   if (!document.hidden && state.game) syncVideo(state.game);
 });
 yt.onState((st) => logEv('yt', st));
@@ -836,11 +899,13 @@ function scoreLoop(round) {
       state.live[net.myId] = score;
       updateScores(active);
       if (g.myIndex >= 0) net.broadcast({ type: 'live', round: g.round, score });
-      g.fps = g.frames || 0; g.frames = 0;
+      // quadros por segundo de verdade (a 1ª conta só começa a medir: antes dela vinham os quadros da contagem toda)
+      if (g.fpsAt) g.fps = Math.round((g.frames || 0) / Math.max(0.001, (now - g.fpsAt) / 1000));
+      g.fpsAt = now; g.frames = 0;
       avatarGuard(g);
       if (g.log) {
         g.log.event('score', score);
-        g.log.event('fps', g.fps || 0);
+        if (g.fps !== undefined) g.log.event('fps', g.fps);
         // guarda de tempos em tempos: se a aba fechar ou o PC travar, o relatório não se perde
         if (now - (g.logSaved || 0) > 30000) { g.logSaved = now; saveLog(g.log); }
       }
@@ -856,7 +921,7 @@ state.avatars = Object.create(null);
 let lastAvatarIds = '', avShareTimer = 0, avStage = null;
 const isLite = () => document.documentElement.classList.contains('lite');
 
-function shareAvatar() { if (net.myId) net.broadcast({ type: 'avatar', cfg: myAvatar }); }
+function shareAvatar() { avShareTimer = 0; if (net.myId) net.broadcast({ type: 'avatar', cfg: myAvatar }); }
 net.on('avatar', (msg) => {
   if (!msg || !msg.from) return;
   const cfg = sanitizeAvatar(msg.cfg);
@@ -883,7 +948,9 @@ async function setupAvatars(g) {
   const list = order.map((pi, slot) => {
     figOf.set(pi, slot);
     const p = g.players[pi];
-    if (!state.avatars[p.id]) state.avatars[p.id] = p.id === net.myId ? myAvatar : randomAvatar();
+    // a minha é sempre a versão atual (acabou de editar no provador e já começou a música: sem esperar o envio)
+    if (p.id === net.myId) state.avatars[p.id] = myAvatar;
+    else if (!state.avatars[p.id]) state.avatars[p.id] = randomAvatar();
     return { cfg: state.avatars[p.id], slot, color: colorOf(pi) };
   });
   avStage.setPlayers(list);
@@ -972,6 +1039,19 @@ $('av-modal').addEventListener('click', (e) => { if (e.target === $('av-modal'))
 $('av-on').onchange = () => { setAvatarsEnabled($('av-on').checked); avTagText(); };
 $('av-random').onclick = () => { setMyAvatar(randomAvatar()); renderAvPanel(); if (avPrev) avPrev.react(0, 'good'); };
 document.querySelectorAll('.av-tab').forEach((b) => { b.onclick = () => { avTab = b.dataset.tab; renderAvPanel(); }; });
+// abas pelo teclado: setas trocam de aba (padrão de abas acessíveis)
+document.querySelector('.av-tabs').addEventListener('keydown', (e) => {
+  const tabs = [...document.querySelectorAll('.av-tab')];
+  const i = tabs.indexOf(document.activeElement);
+  if (i < 0) return;
+  const j = e.key === 'ArrowRight' ? (i + 1) % tabs.length : e.key === 'ArrowLeft' ? (i - 1 + tabs.length) % tabs.length
+    : e.key === 'Home' ? 0 : e.key === 'End' ? tabs.length - 1 : -1;
+  if (j < 0) return;
+  e.preventDefault();
+  avTab = tabs[j].dataset.tab; renderAvPanel(); tabs[j].focus();
+});
+// Esc fecha o provador (igual à calibração)
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('av-modal').classList.contains('hidden')) closeAvatarModal(); });
 $('av-panel').addEventListener('click', (e) => {
   const b = e.target.closest('[data-k]'); if (!b) return;
   const k = b.dataset.k; const v = k === 'blush' ? b.dataset.v === 'true' : b.dataset.v;
@@ -986,7 +1066,12 @@ function setMyAvatar(cfg) {
 }
 function renderAvPanel() {
   const O = AV_OPTIONS, me = myAvatar;
-  document.querySelectorAll('.av-tab').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === avTab)));
+  document.querySelectorAll('.av-tab').forEach((b) => {
+    const on = b.dataset.tab === avTab;
+    b.setAttribute('aria-selected', String(on));
+    b.tabIndex = on ? 0 : -1;
+    if (on) $('av-panel').setAttribute('aria-labelledby', b.id);
+  });
   const chips = (k, list) => `<div class="av-chips">${list.map(([v, l]) => `<button class="av-chip" type="button" data-k="${k}" data-v="${v}" aria-pressed="${String(me[k]) === String(v)}">${l}</button>`).join('')}</div>`;
   const sw = (k, list) => `<div class="av-chips">${list.map((c) => `<button class="av-sw" type="button" style="background:${c}" data-k="${k}" data-v="${c}" aria-pressed="${me[k] === c}" aria-label="cor ${c}"></button>`).join('')}</div>`;
   const opt = (label, html) => `<div class="av-opt"><span>${label}</span>${html}</div>`;
@@ -1000,6 +1085,7 @@ function renderAvPanel() {
 }
 async function openAvatarModal() {
   $('av-modal').classList.remove('hidden');
+  trapFocus($('av-modal'), $('av-close'));
   $('av-on').checked = avatarsEnabled();
   $('av-msg').textContent = 'Carregando…';
   renderAvPanel();
@@ -1026,7 +1112,10 @@ async function openAvatarModal() {
   avPrevRaf = requestAnimationFrame(loop);
 }
 function closeAvatarModal() {
+  // mudou a bonequinha e fechou (ou a música começou): manda o visual novo já, sem esperar o intervalo
+  if (avShareTimer) { clearTimeout(avShareTimer); avShareTimer = 0; shareAvatar(); }
   $('av-modal').classList.add('hidden');
+  releaseFocus($('av-modal'));
   cancelAnimationFrame(avPrevRaf);
   // libera o 3D do provador (PC fraco não precisa ficar com 2 palcos abertos)
   if (avPrev) { avPrev.dispose(); avPrev = null; }
@@ -1051,9 +1140,9 @@ function newLog(g) {
     latency: g.scorer.latency,
   });
 }
-$('btn-log').onclick = $('cal-log').onclick = () => {
+$('btn-log').onclick = $('cal-log').onclick = async () => {
   const g = state.game;
-  const log = (g && g.log) || lastLog();
+  const log = (g && g.log) || await lastLog();
   if (!downloadLog(log)) toast('Ainda não tem relatório: cante uma música primeiro 🙂');
   else toast('Relatório baixado! Manda o arquivo .json pra quem está te ajudando 📋', 5000);
 };
@@ -1128,6 +1217,9 @@ function diagnose(g, active, lt, m, playing, dt) {
   } else setStatus(key);
 }
 
+// clicar no aviso resolve o que dá pra resolver na hora
+const STATUS_CLICK = new Set(['off', 'suspended', 'muted', 'silent', 'frozen']);
+
 function setStatus(key, text) {
   logEv('aviso', key || '-');
   const el = $('score-status');
@@ -1136,9 +1228,12 @@ function setStatus(key, text) {
   el.className = 'score-status glass ' + cls;
   el.textContent = text || msg;
   el.dataset.key = key;
+  // só é "botão de verdade" quando clicar resolve alguma coisa (senão o Tab nem para nele)
+  const clickable = STATUS_CLICK.has(key);
+  el.tabIndex = clickable ? 0 : -1;
+  el.setAttribute('aria-disabled', String(!clickable));
 }
 
-// clicar no aviso resolve o que dá pra resolver na hora
 $('score-status').onclick = async () => {
   const key = $('score-status').dataset.key;
   if (key === 'off') { if (await startMic()) toast('Microfone ligado de novo 🎤'); }
@@ -1159,11 +1254,14 @@ document.addEventListener('pointerdown', () => { if (mic.active) mic.resume(); }
 
 /* ---------- avaliação de cada linha que termina: "Perfeito! +412" ---------- */
 let rateTimer = 0;
+function logLine(g, i, r) {
+  if (g.log) g.log.event('linha', { i, nota: Math.round(r.v * 100), pts: r.points, fol: Math.round(r.presence * 100), afi: Math.round(r.tune * 100), tim: Math.round(r.timbre * 100), rit: Math.round(r.rhythm * 100) });
+}
 function rateLine(g, i) {
   const r = g.scorer.lineResult(i);
   if (!r) return;
   const v = r.v;
-  logEv('linha', { i, nota: Math.round(v * 100), pts: r.points, fol: Math.round(r.presence * 100), afi: Math.round(r.tune * 100), tim: Math.round(r.timbre * 100), rit: Math.round(r.rhythm * 100) });
+  logLine(g, i, r);
   const [label, cls] = v >= 0.92 ? ['✨ PERFEITO!', 'perfect'] : v >= 0.8 ? ['🔥 Ótimo!', 'great'] : v >= 0.6 ? ['👍 Bom', 'good']
     : v >= 0.35 ? ['🙂 Ok', 'ok'] : ['😬 Ops…', 'miss'];
   // o que mais atrapalhou nessa linha (só quando não foi ótima)
@@ -1207,6 +1305,8 @@ function resultTip(g) {
 
 /* ---------- PC fraco: se a tela estiver desenhando devagar, liga o modo leve ---------- */
 let fpsStart = 0, fpsSum = 0, fpsN = 0, fpsLast = 0;
+/** começa a medir do zero (rodada nova / voltou pra aba): sem isso, sobra de antes decidia o modo leve */
+function resetFpsWatch() { fpsStart = 0; fpsSum = 0; fpsN = 0; fpsLast = 0; }
 function watchFps(now) {
   if (document.documentElement.classList.contains('lite')) return;
   try { if (localStorage.getItem('ic-lite') === '0') return; } catch (e) { /* ok */ }
@@ -1296,7 +1396,8 @@ function ownerLabel(w) {
   if (w === g.myIndex) return '🎤 SUA VEZ!';
   return `👀 VEZ DE ${(g.players[w] ? g.players[w].name : '?').toUpperCase()}`;
 }
-const isMine = (w) => w === ALL || w === state.game.myIndex;
+// quem só está assistindo (myIndex -1, que é o mesmo número de ALL) não é dona de nenhuma linha
+const isMine = (w) => state.game.myIndex >= 0 && (w === ALL || w === state.game.myIndex);
 
 /** Faixa grande em cima da letra dizendo de quem é a vez (atualiza todo quadro) */
 const SOON = 5;   // segundos de aviso antes da minha vez
@@ -1341,12 +1442,13 @@ function updateBanner(active, k, lt) {
     else {
       w = g.who[k + 1];
       const secs = Math.ceil(nx.t - lt);
-      if (secs > 6) { main = '🎵 Instrumental'; sub = `Depois: ${ownerLabel(w).replace(/^\S+\s/, '').toLowerCase()}`; }
+      // próxima linha é minha: fica no "Instrumental" até a contagem de SOON segundos (sem piscar "Em 6s")
+      if (secs > (m && m.j === k + 1 ? SOON : 6)) { main = '🎵 Instrumental'; sub = `Depois: ${ownerLabel(w).replace(/^\S+\s/, '').toLowerCase()}`; }
       else { main = ownerLabel(w); sub = `Em ${secs}s`; mode = 'other'; }
     }
   }
 
-  const key = main + '|' + sub + '|' + mode;
+  const key = main + '|' + sub + '|' + mode + '|' + w;
   if (key === bannerKey) return;
   bannerKey = key;
   const b = $('turn-banner');
@@ -1391,14 +1493,14 @@ net.on('live', (msg) => {
 });
 
 /* ---------- som da música (cada uma escolhe no seu PC) ---------- */
-let musicOff = localStorage.getItem('ic-music-off') === '1';
+let musicOff = local.get('ic-music-off') === '1';
 function renderMute() {
   $('btn-mute').textContent = musicOff ? '🔇 Música desligada' : '🔊 Música ligada';
   $('btn-mute').classList.toggle('is-on', musicOff);
 }
 $('btn-mute').onclick = () => {
   musicOff = !musicOff;
-  localStorage.setItem('ic-music-off', musicOff ? '1' : '0');
+  local.set('ic-music-off', musicOff ? '1' : '0');
   yt.setMuted(musicOff);
   renderMute();
   toast(musicOff ? 'Música desligada. A letra continua passando, é só cantar! 🎤' : 'Música ligada 🎶');
@@ -1407,14 +1509,21 @@ yt.setMuted(musicOff);
 renderMute();
 
 /* ---------- me ouvir (voz no fone enquanto canta) ---------- */
-let hearMe = localStorage.getItem('ic-hear') === '1';
+let hearMe = local.get('ic-hear') === '1';
 function renderHear() {
   $('btn-hear').textContent = hearMe ? '🎧 Me ouvindo' : '🎧 Me ouvir';
   $('btn-hear').classList.toggle('is-on', hearMe);
 }
+mic.onMonitorFail = () => {
+  hearMe = false;
+  local.set('ic-hear', '0');
+  renderHear();
+  stopCalHear();
+  toast('Não consegui abrir o microfone de novo pra você se ouvir 😕 (o jogo continua normal)', 5000);
+};
 $('btn-hear').onclick = () => {
   hearMe = !hearMe;
-  localStorage.setItem('ic-hear', hearMe ? '1' : '0');
+  local.set('ic-hear', hearMe ? '1' : '0');
   const g = state.game;
   if (g && !g.finished && g.myIndex >= 0) mic.monitor(hearMe);
   renderHear();
@@ -1474,6 +1583,8 @@ $('btn-rec-play').onclick = () => {
     const st = yt.state();
     const want = yt.time() - rec.offset;
     if (st === 1) {
+      // o vídeo ainda está antes do ponto em que a gravação começou: a voz espera (sem gaguejar no 0)
+      if (want < -0.05) { if (!a.paused) a.pause(); return; }
       if (a.paused) { a.currentTime = Math.max(0, want); a.play().catch(() => {}); }
       else if (Math.abs(a.currentTime - want) > 0.3) a.currentTime = Math.max(0, want);
     } else if (st === 3 || st === 2) {
@@ -1527,6 +1638,8 @@ net.on('end', (msg) => { if (state.game && msg.round === state.game.round) finis
 function finishRound() {
   const g = state.game;
   if (!g || g.finished) return;
+  // a música acabou no meio de uma linha minha: ela também vai pro relatório (antes só as que terminavam)
+  if (g.myIndex >= 0 && g.prevActive >= 0) { const r = g.scorer.lineResult(g.prevActive); if (r) logLine(g, g.prevActive, r); }
   g.finished = true;
   stopAvatars(g);
   yt.pause();
@@ -1606,7 +1719,7 @@ function renderResults() {
 
   const bar = (label, v) => `<span>${label}</span><div class="bar"><div style="width:${v}%"></div></div><span>${v}%</span>`;
   $('result-list').innerHTML = done.map((x, pos) => `
-    <div class="result-item ${complete && pos === 0 && !tie && rows.length > 1 ? 'winner' : ''}" style="--c:${colorOf(x.i)}; animation-delay:${pos * 0.12}s">
+    <div class="result-item ${complete && pos === 0 && !tie && rows.length > 1 && x.r.total > 0 ? 'winner' : ''}" style="--c:${colorOf(x.i)}; animation-delay:${pos * 0.12}s">
       <div class="result-top">
         <span class="dot" style="color:${colorOf(x.i)}"></span>
         <span class="pname">${esc(x.name)}${x.id === net.myId ? ' <span class="hint">(você)</span>' : ''}</span>
@@ -1636,14 +1749,14 @@ let lastReact = 0;
 document.querySelectorAll('.react').forEach((b) => {
   b.onclick = () => {
     const now = Date.now();
-    if (now - lastReact < 400 || !state.game) return;   // sem metralhadora de emoji
+    if (now - lastReact < 400 || !state.game || state.game.finished) return;   // sem metralhadora de emoji
     lastReact = now;
     net.broadcast({ type: 'react', emoji: b.dataset.e });
   };
 });
 const lastReactFrom = Object.create(null);
 net.on('react', (msg) => {
-  if (!state.game || !REACTIONS.includes(msg.emoji) || !inRound(msg.from)) return;
+  if (!state.game || state.game.finished || !REACTIONS.includes(msg.emoji) || !inRound(msg.from)) return;
   const now = Date.now();
   if (now - (lastReactFrom[msg.from] || 0) < 300 || $('reactions').childElementCount >= 30) return;
   lastReactFrom[msg.from] = now;
@@ -1802,7 +1915,7 @@ const MEDAL_CATS = [
 ];
 /** uma medalha pra cada (só quando tem 2 ou mais) */
 function medalsFor(done) {
-  const out = {};
+  const out = Object.create(null);
   if (done.length < 2) return out;
   for (const [k, good] of MEDAL_CATS) {
     const sorted = [...done].sort((a, b) => b.r[k] - a.r[k]);

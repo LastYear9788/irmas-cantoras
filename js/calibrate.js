@@ -2,7 +2,8 @@
 // Mede ruído ambiente + voz cantada, ajusta o VoiceGate pro microfone real da pessoa
 // e detecta problemas comuns: mudo, conflito com Discord/Windows, driver travado,
 // supressor de ruído externo (NVIDIA Broadcast/Krisp) e filtros do navegador cortando canto.
-import { mic } from './mic.js?v=22';
+import { mic } from './mic.js?v=23';
+import { trapFocus, releaseFocus } from './a11y.js?v=23';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -33,8 +34,12 @@ let run = null;          // estado da calibração automática de 5s
 let lastSummary = null;  // { status: 'ok' | 'warn' | 'bad', text }
 let onStateChange = null;
 let initialized = false;
+let openSeq = 0;         // cada abertura do modal tem um número (fechar/abrir rápido não cria 2 laços)
+const PHONES_KEY = 'ic-asked-phones';
+const rememberPhones = (rawMode) => { try { localStorage.setItem(PHONES_KEY, rawMode ? 'fone' : 'caixa'); } catch (e) { /* ok */ } };
 
 export function isCalibrationOpen() { return open; }
+export function stopCalHear() { if (testingHear) { testingHear = false; renderHearBtn(); } }
 
 export function initCalibration(cb) {
   if (initialized) return;
@@ -56,13 +61,15 @@ export function initCalibration(cb) {
   $('cal-device').onchange = async () => {
     const deviceId = $('cal-device').value;
     mic.setConfig({ deviceId });
+    lastSummary = null;   // outro microfone: o resultado da calibração anterior não vale mais
+    renderBadges();
     await connectAndRefresh(true);
   };
 
   $('cal-raw').onchange = async () => {
     const rawMode = $('cal-raw').checked;
     mic.setConfig({ rawMode });
-    try { localStorage.setItem('ic-asked-phones', rawMode ? 'fone' : 'caixa'); } catch (e) { /* ok */ }
+    rememberPhones(rawMode);
     await connectAndRefresh(true);
   };
 
@@ -87,11 +94,13 @@ export function initCalibration(cb) {
     if (type === 'enable-raw') {
       $('cal-raw').checked = true;
       mic.setConfig({ rawMode: true });
+      rememberPhones(true);   // igual ao interruptor: não pergunta "está de fone?" de novo
       await connectAndRefresh(true);
       startAutoCalibration();
     } else if (type === 'disable-raw') {
       $('cal-raw').checked = false;
       mic.setConfig({ rawMode: false });
+      rememberPhones(false);
       await connectAndRefresh(true);
       startAutoCalibration();
     } else if (type === 'restart') {
@@ -116,6 +125,7 @@ export async function openCalibration() {
   open = true;
   run = null;
   modal.classList.remove('hidden');
+  trapFocus(modal, $('cal-close'));
 
   const cfg = mic.getConfig();
   $('cal-raw').checked = !!cfg.rawMode;
@@ -124,7 +134,10 @@ export async function openCalibration() {
   $('cal-checks').classList.add('hidden');
   renderHearBtn();
 
+  const my = ++openSeq;
   await connectAndRefresh(false);
+  if (!open || my !== openSeq) return;   // fecharam (ou fecharam e abriram de novo) enquanto conectava
+  cancelAnimationFrame(raf);
   loop();
 }
 
@@ -140,6 +153,7 @@ export function closeCalibration() {
     renderHearBtn();
   }
   modal.classList.add('hidden');
+  releaseFocus(modal);
   renderBadges();
   if (onStateChange) onStateChange();
 }
@@ -184,6 +198,8 @@ async function connectAndRefresh(forceRestart) {
     renderTechMeta();
     $('cal-run').disabled = false;
     $('cal-hear').disabled = false;
+    // conectou: um aviso de "microfone bloqueado" de antes (ou de outra configuração) não vale mais
+    if (forceRestart || (lastSummary && lastSummary.blocked)) { lastSummary = null; renderBadges(); }
     if (onStateChange) onStateChange();
   } catch (e) {
     $('cal-live-box').className = 'cal-live bad';
@@ -194,7 +210,7 @@ async function connectAndRefresh(forceRestart) {
       detail: e.message || 'Não foi possível abrir o microfone.',
       action: { id: 'restart', label: '🔄 Tentar novamente' },
     }]);
-    lastSummary = { status: 'bad', text: '⚠️ Microfone bloqueado ou em conflito' };
+    lastSummary = { status: 'bad', text: '⚠️ Microfone bloqueado ou em conflito', blocked: true };
     renderBadges();
   }
   $('cal-restart').disabled = false;
@@ -241,8 +257,7 @@ function finishAutoCalibration(r) {
 
   // "mudo" se decide SÓ pela etapa de canto: muito microfone (filtro do Windows/fone,
   // cancelamento de eco) manda zero absoluto enquanto a pessoa está quieta, e isso é normal
-  const allPeaks = [...q, ...s].map((x) => x.peak);
-  const maxPeak = allPeaks.length ? Math.max(...allPeaks) : 0;
+  const singMax = s.length ? Math.max(...s.map((x) => x.peak)) : 0;
   const singReal = s.filter((x) => x.peak >= 2e-6).length / Math.max(1, s.length);
   const singShare = (p) => s.filter((x) => x.problem === p).length / Math.max(1, s.length);
   const quietZero = q.length ? q.filter((x) => x.peak < 2e-6).length / q.length : 0;
@@ -276,7 +291,7 @@ function finishAutoCalibration(r) {
       detail: 'O microfone parou de mandar áudio novo. Isso costuma acontecer quando Discord, Zoom ou o "Modo Exclusivo" do Windows trava o dispositivo. Tente reiniciar ou trocar o microfone acima.',
       action: { id: 'restart', label: '🔄 Reiniciar microfone' },
     });
-  } else if (singShare('muted') > 0.5 || maxPeak === 0 || singReal < 0.1) {
+  } else if (singShare('muted') > 0.5 || singMax === 0 || singReal < 0.1) {
     checks.push({
       level: 'bad',
       title: 'Microfone mudo ou sem sinal',
@@ -291,6 +306,10 @@ function finishAutoCalibration(r) {
         + (quietZero > 0.5 ? ' Ele zera o som quando você fica quieta (filtro do Windows/fone) — tudo bem, não atrapalha.' : ''),
     });
   }
+
+  // microfone sem sinal na etapa de canto: as contas de ruído e de voz abaixo não fazem sentido
+  // (antes, ruído no silêncio + mudo no canto dava "mudo" e "ruído sob controle" ao mesmo tempo)
+  const micDead = checks[checks.length - 1].level === 'bad';
 
   // 2) Bluetooth / taxa reduzida / webcam
   if (info.bluetooth) {
@@ -310,7 +329,7 @@ function finishAutoCalibration(r) {
   // cantou/falou (ou tinha música tocando) na etapa do silêncio: o "ruído" medido é a própria voz,
   // então as contas de ruído e volume não valem. Avisa em vez de dizer "não ouvi voz".
   const quietVoiced = q.length ? q.filter((x) => x.voiced).length / q.length : 0;
-  const noisyQuiet = maxPeak > 0 && quietVoiced > 0.25 && voiceLevel < floor * 1.5;
+  const noisyQuiet = !micDead && quietVoiced > 0.25 && voiceLevel < floor * 1.5;
   if (noisyQuiet) {
     checks.push({
       level: 'warn',
@@ -321,7 +340,7 @@ function finishAutoCalibration(r) {
   }
 
   // 3) Ruído ambiente
-  if (maxPeak > 0 && !noisyQuiet) {
+  if (!micDead && !noisyQuiet) {
     if (floor > 0.022) {
       checks.push({
         level: 'warn',
@@ -357,7 +376,7 @@ function finishAutoCalibration(r) {
   }
 
   // 5) Volume e reconhecimento da nota cantada
-  if (maxPeak > 0 && !noisyQuiet) {
+  if (!micDead && !noisyQuiet) {
     if (voiceLevel < Math.max(0.006, floor * 1.5)) {
       checks.push({
         level: 'bad',
@@ -472,7 +491,17 @@ export function renderBadges() {
 function loop() {
   if (!open) return;
   raf = requestAnimationFrame(loop);
-  if (!mic.active) return;
+  if (!mic.active) {
+    // o microfone caiu no meio da calibração: para (senão a barra congelava e o botão ficava travado)
+    if (run) {
+      run = null;
+      $('cal-progress-wrap').classList.add('hidden');
+      $('cal-run').disabled = false;
+      $('cal-live-box').className = 'cal-live bad';
+      $('cal-live-text').textContent = 'O microfone desconectou no meio do teste. Conecta de novo e clica em 🔄 Reiniciar.';
+    }
+    return;
+  }
 
   const m = mic.read(true);
   const st = mic.status();

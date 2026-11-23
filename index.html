@@ -5,10 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Irmãs Cantoras</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎤</text></svg>">
-  <link rel="stylesheet" href="css/glass.css?v=22">
-  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <link rel="stylesheet" href="css/glass.css?v=23">
+  <script src="js/peerjs.min.js?v=1.5.4"></script>
   <script>
-    document.documentElement.classList.toggle('theme-new', localStorage.getItem('ic-theme') !== 'classic');
+    // (navegador com cookies/armazenamento bloqueado: localStorage dá erro, então tudo vai dentro de try)
+    let savedTheme = null;
+    try { savedTheme = localStorage.getItem('ic-theme'); } catch (e) { /* ok */ }
+    document.documentElement.classList.toggle('theme-new', savedTheme !== 'classic');
     // PC fraco (poucos núcleos/memória, ou já pesou antes): começa no modo leve, salvo se o usuário desligou manualmente ('0')
     try {
       const savedLite = localStorage.getItem('ic-lite');
@@ -16,8 +19,8 @@
         document.documentElement.classList.add('lite');
     } catch (e) { /* ok */ }
   </script>
-  <script type="module" src="js/app.js?v=22"></script>
-  <script type="module" src="js/theme.js?v=22"></script>
+  <script type="module" src="js/app.js?v=23"></script>
+  <script type="module" src="js/theme.js?v=23"></script>
 </head>
 <body>
   <!-- Fundo animado (é o que dá vida ao vidro) -->
@@ -188,7 +191,7 @@
           <div id="ly-next" class="ly-line ly-next"></div>
           <div id="line-rate" class="line-rate" aria-live="polite"></div>
         </div>
-        <button id="score-status" class="score-status glass hidden" role="status" aria-live="polite"></button>
+        <button id="score-status" class="score-status glass hidden" type="button" aria-live="polite"></button>
       </div>
 
       <div class="game-bottom">
@@ -268,12 +271,12 @@
         </div>
         <div class="av-closet">
           <div class="av-tabs" role="tablist" aria-label="Provador">
-            <button class="av-tab" role="tab" data-tab="cabelo" aria-selected="true">💇 Cabelo</button>
-            <button class="av-tab" role="tab" data-tab="roupa" aria-selected="false">👗 Roupa</button>
-            <button class="av-tab" role="tab" data-tab="rosto" aria-selected="false">😊 Rosto</button>
-            <button class="av-tab" role="tab" data-tab="enfeite" aria-selected="false">🎀 Enfeite</button>
+            <button class="av-tab" role="tab" id="av-tab-cabelo" aria-controls="av-panel" data-tab="cabelo" aria-selected="true" tabindex="0">💇 Cabelo</button>
+            <button class="av-tab" role="tab" id="av-tab-roupa" aria-controls="av-panel" data-tab="roupa" aria-selected="false" tabindex="-1">👗 Roupa</button>
+            <button class="av-tab" role="tab" id="av-tab-rosto" aria-controls="av-panel" data-tab="rosto" aria-selected="false" tabindex="-1">😊 Rosto</button>
+            <button class="av-tab" role="tab" id="av-tab-enfeite" aria-controls="av-panel" data-tab="enfeite" aria-selected="false" tabindex="-1">🎀 Enfeite</button>
           </div>
-          <div id="av-panel" class="av-panel"></div>
+          <div id="av-panel" class="av-panel" role="tabpanel" aria-labelledby="av-tab-cabelo"></div>
         </div>
       </div>
       <label class="cal-toggle">

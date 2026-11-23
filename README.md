@@ -41,14 +41,18 @@ Durante a música, cada linha que termina ganha uma avaliação (✨ Perfeito, �
 
 ## Por dentro (pra quem for mexer)
 Site estático, sem build: HTML + CSS + JavaScript puro.
-- `js/net.js`: salas via PeerJS (conexão direta entre os PCs; a dona da sala repassa as mensagens). Já suporta mais de 2 jogadoras.
+- `js/net.js` + `js/peerjs.min.js` (PeerJS 1.5.4, MIT): salas via WebRTC (conexão direta entre os PCs; a dona da sala repassa as mensagens). Já suporta mais de 2 jogadoras.
 - `js/youtube.js`: player do YouTube.
 - `js/lyrics.js`: letra sincronizada. Tenta em ordem: [LRCLIB](https://lrclib.net), Deezer (bom pra música brasileira) e NetEase (bom pra internacional). Deezer e NetEase passam pelo nosso intermediário na Cloudflare (`proxy/worker.js`, plano grátis), com `cors.eu.org` e `allorigins` de reserva. Pra republicar o intermediário: `cd proxy && npx wrangler deploy`. Sempre confere se o nome da música bate com o título do vídeo.
 - `js/parts.js`: quem canta cada linha.
 - `js/mic.js` / `js/pitch.js` / `js/score.js`: microfone, detector de afinação e nota.
-- `tests/run.mjs`: testes automáticos da nota e do detector (`node tests/run.mjs`).
+- `js/calibrate.js`: calibração e diagnóstico do microfone (ruído, cortes, conflito de apps).
+- `js/cam.js`: câmera opcional e fotos da rodada.
+- `js/theme.js` / `js/bubbles.js` / `js/liquid.js`: visual Novo (bolhas + vidro líquido), Clássico e Modo leve automático.
+- `js/a11y.js`: foco e navegação por teclado nos modais.
+- `tests/run.mjs`: testes automáticos da nota, detector, letras, partes e intermediário (`node tests/run.mjs`).
 - `js/avatar.js` + `js/three.min.js` (three.js r128, MIT): bonequinha 3D de cada jogadora, montada com formas simples e sombreado de desenho. Provador no lobby ("🎀 Montar minha bonequinha"); canta junto seguindo volume, nota e vogal da letra. Fica mais simples no modo leve e desliga sozinha na música se o PC engasgar.
-- `js/singlog.js`: relatório técnico da cantoria (botão "📋 Baixar relatório" no resultado e na calibração).
+- `js/singlog.js`: relatório técnico da cantoria (salvo no IndexedDB; botão "📋 Baixar relatório" no resultado e na calibração).
   Pra ler um relatório: `node tools/analisar-relatorio.mjs arquivo.json`.
 - `js/app.js`: telas e fluxo.
 

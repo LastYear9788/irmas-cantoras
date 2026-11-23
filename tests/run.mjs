@@ -1,8 +1,10 @@
 // Testes automáticos (sem navegador). Rodar com:  node tests/run.mjs
 import { Scorer, syllables } from '../js/score.js';
-import { detectPitch, VoiceGate, SignalWatch } from '../js/pitch.js';
+import { detectPitch, VoiceGate, SignalWatch, fftSizeFor, decimationFor, detectPitchDecimated } from '../js/pitch.js';
 import { assignParts, ALL } from '../js/parts.js';
-import { parseLRC, buildQueries } from '../js/lyrics.js';
+import { parseLRC, buildQueries, normName, findLyrics } from '../js/lyrics.js';
+import { extractVideoId } from '../js/youtube.js';
+import proxyWorker from '../proxy/worker.js';
 import { cleanName } from '../js/net.js';
 import { createLog, analyze } from '../js/singlog.js';
 import { sanitizeAvatar, randomAvatar, vowelAt, AV_DEFAULT } from '../js/avatar.js';
@@ -155,6 +157,36 @@ test('vídeo travado (tempo pulando 5s) não vira ponto de graça', () => {
   s.frame(1, lines[1].t + 0.3, good(lines[1].t + 0.3), 5);
   assert(s.stats[1].time <= 1.2, 'contou ' + s.stats[1].time + 's');
 });
+test('vídeo travado quase a música toda: 2 linhas bem cantadas não viram nota cheia', () => {
+  const s = new Scorer(lines, allWho, 0);
+  for (let lt = 0; lt < lines[1].end; lt += 0.04) s.frame(lineAt(lines, lt), lt, good(lt), 0.04);
+  for (let i = 2; i < lines.length; i++) s.frame(i, lines[i].t + 0.1, good(lines[i].t + 0.1), 0);   // passou sem medir
+  const t = s.final().total;
+  assert(t < 2000, 'deu ' + t);
+  // travadinha curta (algumas linhas sem medir) continua sem prejudicar
+  const s2 = new Scorer(lines, allWho, 0);
+  for (let lt = 0; lt < lines[lines.length - 1].end + 1; lt += 0.04) {
+    const i = lineAt(lines, lt);
+    if (i >= 5 && i <= 7) { s2.frame(i, lt, good(lt), 0); continue; }
+    s2.frame(i, lt, good(lt), 0.04);
+  }
+  assert(s2.final().total > 9000, 'travadinha curta deu ' + s2.final().total);
+});
+test('linhas emendadas (sem pausa entre elas) contam as sílabas igual a linhas separadas', () => {
+  // voz alta bem na troca de linha: a 1ª sílaba da linha nova tem que contar
+  const L = [{ t: 0, end: 2.13, text: 'la la la la la la' }, { t: 2.13, end: 4.1, text: 'la la la la la la' }];
+  const voice = (t) => { const ph = (t % 0.3) / 0.3; return ph > 0.85 ? { voiced: false, pitch: 0, rms: 0.01, clarity: 0 } : { voiced: true, pitch: 262, clarity: 0.9, rms: 0.03 + 0.08 * Math.sin(Math.PI * ph / 0.85) }; };
+  const run = (gapTick) => {
+    const s = new Scorer(L, [ALL, ALL], 0);
+    for (let lt = 0; lt < 4.1; lt += 0.02) {
+      let i = lt < 2.13 ? 0 : 1;
+      if (gapTick && lt >= 2.13 && lt < 2.15) i = -1;   // "separadas": uma leitura fora de linha na troca
+      s.frame(i, lt, voice(lt), 0.02);
+    }
+    return s.stats[1].nuclei;
+  };
+  assert(run(false) === run(true), `emendadas ${run(false)} x separadas ${run(true)}`);
+});
 test('detector pulando de oitava não estraga a afinação', () => {
   const r = play(lines, allWho, 0, 25, (t) => { const m = good(t); if (m.voiced && Math.floor(t * 25) % 9 === 0) m.pitch *= 2; return m; }).final();
   assert(r.tune >= 90, 'afinação ' + r.tune);
@@ -218,7 +250,9 @@ test('microfone baixinho (notebook longe) ainda conta', () => {
 });
 test('ligou o microfone com barulho/alguém falando: o app não fica surdo depois', () => {
   const n = synth(songEnd, voice(), 0.004, 0.06);
-  for (let i = 0; i < 3 * RATE; i++) n[i] += 0.09 * Math.sin(i * 0.37) * Math.sin(i * 0.011) + 0.05 * (Math.random() * 2 - 1);
+  let seed = 42;
+  const rnd = () => { seed = (seed * 16807) % 2147483647; return (seed / 2147483647) * 2 - 1; };
+  for (let i = 0; i < 3 * RATE; i++) n[i] += 0.09 * Math.sin(i * 0.37) * Math.sin(i * 0.011) + 0.05 * rnd();
   const t = songScore(n, 25).total;
   assert(t > 7500, 'deu ' + t);
 });
@@ -336,6 +370,13 @@ test('vogal da sílaba cantada segue a letra', () => {
   assert(vowelAt('', 0.5).vowel === 'a' && vowelAt('♪', 0.5).vowel === 'a', 'sem vogal');
   assert(vowelAt(t, 0).idx === 0 && vowelAt(t, 0.99).idx === 8, 'índice da sílaba');
 });
+test('vogal e ritmo da boca funcionam em japonês, chinês e coreano', () => {
+  for (const s of ['夜に駆ける', '月亮代表我的心', '사랑해요']) {
+    const a = vowelAt(s, 0), b = vowelAt(s, 0.5), c = vowelAt(s, 0.99);
+    assert(a.idx === 0 && b.idx > a.idx && c.idx > b.idx, `${s}: ${a.idx}, ${b.idx}, ${c.idx}`);
+    assert('aeiou'.includes(a.vowel) && 'aeiou'.includes(b.vowel), `${s}: vogal inválida`);
+  }
+});
 
 console.log('\nRelatório de diagnóstico');
 test('relatório registra, vira JSON e a análise acha o momento que parou de contar', () => {
@@ -356,6 +397,15 @@ test('relatório registra, vira JSON e a análise acha o momento que parou de co
   assert(/voz baixa demais/.test(txt) && /quase não contou/.test(txt) && /volume típico \d+ vs corte 350/.test(txt), txt);
   assert(/parado\)\s+1[67]%/.test(txt), txt);
 });
+test('relatório guarda tempos inteiros em ms (mesmo com performance.now fracionário)', () => {
+  let now = 100.123456;
+  const log = createLog({ version: 'teste' }, () => now);
+  now += 40.6789;
+  log.tick({ lt: 1.2, active: 0, mine: true, yt: 1, dt: 0.04, rms: 0.02, threshold: 0.01, floor: 0.004, peak: 0.1, rawPitch: 220, rawClarity: 0.9, voiced: true, loud: true, problem: null, src: 'main' });
+  log.event('teste', 1);
+  assert(Number.isInteger(log.cols.t[0]) && log.cols.t[0] === 41, 't=' + log.cols.t[0]);
+  assert(Number.isInteger(log.ev[0][0]) && log.ev[0][0] === 41, 'ev t=' + log.ev[0][0]);
+});
 
 console.log('\nDivisão das partes');
 test('toda linha tem dona e as duas cantam parecido', () => {
@@ -368,6 +418,38 @@ test('modo juntas e sozinha: tudo de todas', () => {
   assert(assignParts(lines, 'together', 3).every((w) => w === ALL), 'juntas');
   assert(assignParts(lines, 'turns', 1).every((w) => w === ALL), 'sozinha');
 });
+test('revezamento em japonês/coreano separa refrão e versos normalmente', () => {
+  const mk = (texts) => texts.map((text, i) => ({ t: i * 3, end: i * 3 + 2.5, text }));
+  // 4 versos únicos (com refrão repetido entre eles -> useChorus = true)
+  const song = mk([
+    '静かな夜に歩いてる', '遠くの街が見えるよ',
+    '사랑해요 너를 사랑해', '사랑해요 영원히 함께',
+    '風が少し冷たいね', '君の名前を呼んだよ',
+    '사랑해요 너를 사랑해', '사랑해요 영원히 함께',
+    '星がそっと瞬いて', '明日の朝を待ってる',
+    '사랑해요 너를 사랑해', '사랑해요 영원히 함께',
+    'もうすぐ日が昇るよ', '笑顔でまた会おうね',
+  ]);
+  const who = assignParts(song, 'turns', 2);
+  assert(who[2] === ALL && who[3] === ALL && who[6] === ALL && who[7] === ALL && who[10] === ALL && who[11] === ALL, 'refrão não ficou de todas: ' + JSON.stringify(who));
+  assert(who[0] !== ALL && who[4] !== ALL && who[0] !== who[4], 'versos não alternaram: ' + JSON.stringify(who));
+});
+test('palavras reservadas do JS ("constructor", "toString") não quebram a divisão', () => {
+  const mk = (texts) => texts.map((text, i) => ({ t: i * 3, end: i * 3 + 2.5, text }));
+  const song = mk(['constructor', 'toString', 'valueOf', 'linha quatro', 'constructor', 'toString', 'linha sete', 'linha oito', 'linha nove', 'linha dez']);
+  const who = assignParts(song, 'turns', 2);
+  assert(who.length === song.length && who.every((w) => w === ALL || w === 0 || w === 1), JSON.stringify(who));
+});
+test('estrofe de 5 linhas divide em 3+2 (e não 4+1)', () => {
+  // 2 estrofes de 5 linhas únicas (separadas por pausa > 3s)
+  const song = [
+    ...[0, 1, 2, 3, 4].map((i) => ({ t: i * 2, end: i * 2 + 1.8, text: `verso um linha ${i}` })),
+    ...[0, 1, 2, 3, 4].map((i) => ({ t: 20 + i * 2, end: 20 + i * 2 + 1.8, text: `verso dois linha ${i}` })),
+  ];
+  const who = assignParts(song, 'turns', 2);
+  // 1ª estrofe: [0,0,0,1,1] (3+2, não 4+1)
+  assert(who[0] === who[1] && who[1] === who[2] && who[2] !== who[3] && who[3] === who[4], '1ª estrofe: ' + JSON.stringify(who.slice(0, 5)));
+});
 
 console.log('\nLetras');
 test('lê LRC, junta dueto e pula linha vazia', () => {
@@ -375,6 +457,66 @@ test('lê LRC, junta dueto e pula linha vazia', () => {
   assert(l.length === 3, 'deu ' + l.length + ' linhas');
   assert(l[1].text === 'A / B', 'dueto: ' + l[1].text);
   near(l[0].end, 3.5, 0.001, 'fim da linha 1');
+});
+test('LRC melhorado (<tempo> / [tempo] no meio) limpa marcações sem duplicar linha, e mantém [t1][t2] repetido', () => {
+  const l = parseLRC([
+    '[00:01.00]<00:01.00>Olá <00:01.50>mundo',
+    '[00:04.00]Palavra [00:04.80]no meio',
+    '[00:08.00][00:20.00]Refrão repetido',
+  ].join('\n'));
+  assert(l.length === 4, 'esperado 4 linhas, deu ' + l.length + ': ' + JSON.stringify(l));
+  assert(l[0].text === 'Olá mundo', 'enhanced: ' + l[0].text);
+  assert(l[1].text === 'Palavra no meio', 'inline: ' + l[1].text);
+  assert(l[2].text === 'Refrão repetido' && l[3].text === 'Refrão repetido', 'repetido');
+  near(l[3].t, 20, 0.001, 'tempo da repetição');
+});
+test('filtra créditos da NetEase sem apagar versos em japonês/chinês com dois-pontos', () => {
+  const l = parseLRC([
+    '[00:00.00]作词 : 方文山',
+    '[00:01.00]作曲：周杰伦',
+    '[00:02.00]编曲 : 钟兴民',
+    '[00:03.00]混音师 : João',
+    '[00:05.00]午前0時: 君を待つ',
+    '[00:08.00]君の答え：愛してる',
+    '[00:11.00]爱：是一道光',
+  ].join('\n'));
+  assert(l.length === 3, 'esperado 3 versos reais, deu ' + l.length + ': ' + JSON.stringify(l.map((x) => x.text)));
+  assert(l[0].text === '午前0時: 君を待つ' && l[1].text === '君の答え：愛してる' && l[2].text === '爱：是一道光', JSON.stringify(l));
+});
+test('extractVideoId aceita links do YouTube e recusa links falsos ou IDs quebrados', () => {
+  const id = 'dQw4w9WgXcQ';
+  for (const ok of [
+    id,
+    `https://www.youtube.com/watch?v=${id}`,
+    `https://youtube.com/watch?si=abc&v=${id}&t=42s`,
+    `https://m.youtube.com/watch?v=${id}`,
+    `https://music.youtube.com/watch?v=${id}&list=RD123`,
+    `https://youtu.be/${id}?si=xyz`,
+    `https://www.youtube.com/shorts/${id}`,
+    `https://www.youtube.com/embed/${id}`,
+    `https://www.youtube.com/live/${id}/`,
+    `https://www.youtube.com/v/${id}`,
+    `youtu.be/${id}`,
+    `youtube.com/watch?v=${id}`,
+    `Olha essa música https://youtu.be/${id} boa demais`,
+    `https://www.youtube.com/watch?other_v=12345678901&v=${id}`,
+  ]) {
+    assert(extractVideoId(ok) === id, `devia aceitar ${ok} -> ${extractVideoId(ok)}`);
+  }
+  for (const bad of [
+    '',
+    'abc',
+    `${id}EXTRA`,
+    `https://www.youtube.com/watch?v=${id}EXTRA`,
+    'https://www.youtube.com/watch?other_v=12345678901',
+    `https://evil.com/shorts/${id}`,
+    `https://evil.com/watch?v=${id}`,
+    `https://youtu.be/${id}EXTRA`,
+    'https://www.youtube.com/playlist?list=PL12345678901',
+    'https://www.youtube.com/@Anitta',
+  ]) {
+    assert(extractVideoId(bad) === null, `devia recusar ${bad} -> ${extractVideoId(bad)}`);
+  }
 });
 test('monta busca a partir do título do vídeo', () => {
   const q = buildQueries('Anitta - Envolver (Official Music Video)', 'Anitta');
@@ -384,6 +526,141 @@ test('cleanName remove caracteres invisíveis/de controle e limita tamanho', () 
   assert(cleanName('  \u0000Bia\u200b  \n ') === 'Bia', 'deu: ' + JSON.stringify(cleanName('  \u0000Bia\u200b  \n ')));
   assert(cleanName('\u0000\u0007   ') === 'Amiga', 'vazio');
   assert(cleanName('NomeMuitoCompridoDemaisMesmo').length === 16, 'limite 16');
+});
+
+console.log('\nPlacas de som (44,1 a 192 kHz)');
+// voz com 3 harmônicos, como o microfone entrega (leitura do tamanho que mic.js usa)
+function voiceAt(rate, f) {
+  const b = new Float32Array(fftSizeFor(rate));
+  for (let i = 0; i < b.length; i++) {
+    const t = i / rate;
+    b[i] = 0.1 * (Math.sin(2 * Math.PI * f * t) + 0.5 * Math.sin(4 * Math.PI * f * t) + 0.25 * Math.sin(6 * Math.PI * f * t));
+  }
+  return b;
+}
+test('a janela lida tem ~43 ms e ~1024 amostras pro detector em qualquer taxa', () => {
+  for (const rate of [44100, 48000, 88200, 96000, 176400, 192000]) {
+    const n = fftSizeFor(rate), d = decimationFor(rate);
+    assert((n & (n - 1)) === 0, `${rate}: ${n} não é potência de 2`);
+    assert(n / rate > 0.04, `${rate}: janela de ${(1000 * n / rate).toFixed(1)} ms`);
+    assert(n / d === 1024, `${rate}: ${n / d} amostras pro detector`);
+  }
+});
+test('voz grave e aguda é reconhecida igual a 48, 96 e 192 kHz (erro < 15 cents)', () => {
+  for (const rate of [44100, 48000, 96000, 192000]) {
+    const h = new Float32Array(fftSizeFor(rate) / decimationFor(rate));
+    for (const f of [70, 90, 110, 220, 440, 880]) {
+      const r = detectPitchDecimated(voiceAt(rate, f), rate, h);
+      assert(r.pitch && cents(r.pitch, f) < 15, `${rate} Hz, ${f} Hz -> ${r.pitch.toFixed(1)}`);
+    }
+  }
+});
+
+console.log('\nBusca de letra');
+test('nome de música em coreano, russo e grego não some ao comparar', () => {
+  assert(normName('사랑해 (Official MV)') !== '', 'coreano sumiu');
+  assert(normName('사랑해 (Official MV)') === normName('사랑해'), 'coreano: ' + normName('사랑해 (Official MV)'));
+  assert(normName('Катюша') === normName('катюша') && normName('Катюша') !== '', 'russo');
+  assert(normName('Αγάπη') !== '', 'grego');
+  assert(normName('Évidemment (Live)') === 'evidemment', 'latino: ' + normName('Évidemment (Live)'));
+  assert(normName('夜に駆ける') === '夜に駆ける', 'japonês');
+});
+
+// testes que esperam a rede (falsa): fetch trocado por um de mentira durante o teste
+async function atest(name, fn) {
+  const realFetch = globalThis.fetch;
+  try { await fn(); passed++; console.log('  ✔ ' + name); }
+  catch (e) { failed++; console.log('  ✘ ' + name + '\n      ' + e.message); }
+  finally { globalThis.fetch = realFetch; }
+}
+const jsonRes = (x, status = 200) => new Response(JSON.stringify(x), { status, headers: { 'Content-Type': 'application/json' } });
+const LRC = Array.from({ length: 8 }, (_, i) => `[00:${String(10 + i * 3).padStart(2, '0')}.00] linha ${i + 1} da música`).join('\n');
+
+await atest('LRCLIB: versão acústica com duração mais parecida perde pra original', async () => {
+  globalThis.fetch = async (url) => {
+    if (String(url).includes('lrclib.net')) return jsonRes([
+      { id: 1, trackName: 'Never Gonna Give You Up (Acoustic)', artistName: 'Rick Astley', duration: 213, syncedLyrics: LRC },
+      { id: 2, trackName: 'Never Gonna Give You Up', artistName: 'Rick Astley', duration: 211, syncedLyrics: LRC },
+    ]);
+    throw new TypeError('sem rede no teste');
+  };
+  const r = await findLyrics('Rick Astley - Never Gonna Give You Up (Official Video)', 'Rick Astley', 213);
+  assert(r.track === 'Never Gonna Give You Up', 'escolheu: ' + r.track);
+});
+await atest('busca pulada no meio não continua procurando nas outras fontes', async () => {
+  const asked = [];
+  let releaseA;
+  const gateA = new Promise((r) => { releaseA = r; });
+  globalThis.fetch = async (url) => {
+    const u = decodeURIComponent(String(url));
+    asked.push(u);
+    if (u.includes('lrclib.net') && u.includes('Primeira')) { await gateA; return jsonRes([]); }
+    if (u.includes('lrclib.net')) return jsonRes([{ id: 9, trackName: 'Segunda Cancao', artistName: 'Banda B', duration: 200, syncedLyrics: LRC }]);
+    throw new TypeError('sem rede no teste');
+  };
+  const a = findLyrics('Banda A - Primeira Musica', 'Banda A', 180).then(() => 'achou', (e) => e.message);
+  await new Promise((r) => setTimeout(r, 20));
+  const b = await findLyrics('Banda B - Segunda Cancao', 'Banda B', 200);
+  releaseA();
+  const ra = await a;
+  assert(b.track === 'Segunda Cancao', 'a nova não achou');
+  assert(ra === 'cancelado', 'a velha terminou com: ' + ra);
+  const extra = asked.filter((u) => u.includes('Primeira') && !u.includes('lrclib.net'));
+  assert(!extra.length, 'a velha ainda perguntou: ' + extra.join(', '));
+});
+
+console.log('\nQuem só assiste');
+test('espectadora (fora da lista de jogadoras) não é dona das linhas de "todas"', () => {
+  const s = play(lines, allWho, -1, 25, singer());
+  assert(s.mine.every((m) => !m), 'marcou linhas como dela');
+  assert(s.final().total === 0, 'ganhou ponto: ' + s.final().total);
+});
+
+console.log('\nIntermediário (proxy/worker.js)');
+const ORIGIN = 'https://lastyear9788.github.io';
+const askProxy = (target, { method = 'GET', origin = ORIGIN, headers = {}, body } = {}) => proxyWorker.fetch(new Request(
+  'https://proxy.test/?url=' + encodeURIComponent(target), { method, headers: { Origin: origin, ...headers }, body }));
+await atest('recusa site de fora, destino fora da lista, porta, senha na URL e método errado', async () => {
+  let called = 0;
+  globalThis.fetch = async () => { called++; return jsonRes({}); };
+  const cases = [
+    ['site de fora', await askProxy('https://lrclib.net/api/search?q=x', { origin: 'https://malvado.com' }), 403],
+    ['destino fora da lista', await askProxy('https://example.com/'), 403],
+    ['porta', await askProxy('https://lrclib.net:8443/api'), 403],
+    ['senha na URL', await askProxy('https://a:b@lrclib.net/api'), 403],
+    ['http', await askProxy('http://lrclib.net/api'), 403],
+    ['POST onde só pode GET', await askProxy('https://api.deezer.com/search', { method: 'POST', body: '{}' }), 403],
+    ['GET onde só pode POST', await askProxy('https://pipe.deezer.com/api'), 403],
+    ['outro caminho no pipe', await askProxy('https://pipe.deezer.com/outra', { method: 'POST', body: '{}' }), 403],
+    ['corpo gigante', await askProxy('https://pipe.deezer.com/api', { method: 'POST', body: 'x'.repeat(20000) }), 413],
+  ];
+  for (const [what, res, want] of cases) {
+    assert(res.status === want, `${what}: ${res.status} (esperado ${want})`);
+    assert(res.headers.get('Access-Control-Allow-Origin'), `${what}: sem CORS`);
+  }
+  assert(called === 0, `chamou a fonte ${called}x`);
+});
+await atest('repassa o que o app usa; Authorization só vai pro pipe do Deezer', async () => {
+  const seen = [];
+  globalThis.fetch = async (url, init) => { seen.push({ url, init }); return jsonRes({ ok: 1 }); };
+  const r1 = await askProxy('https://music.163.com/api/search/get?s=x', { headers: { Authorization: 'Bearer segredo' } });
+  const r2 = await askProxy('https://pipe.deezer.com/api', { method: 'POST', body: '{"q":1}', headers: { Authorization: 'Bearer abc', 'Content-Type': 'application/json' } });
+  assert(r1.status === 200 && (await r1.json()).ok === 1, 'GET não repassou');
+  assert(r2.status === 200, 'POST não repassou');
+  assert(r1.headers.get('Access-Control-Allow-Origin') === ORIGIN, 'sem CORS');
+  assert(!seen[0].init.headers.Authorization, 'mandou Authorization pro NetEase');
+  assert(seen[1].init.headers.Authorization === 'Bearer abc' && seen[1].init.body === '{"q":1}', 'pipe sem Authorization/corpo');
+  assert(seen.every((s) => s.init.redirect === 'manual' && s.init.signal), 'sem redirect manual/tempo limite');
+});
+await atest('redirecionamento e fonte fora do ar viram erro COM CORS (não "erro de CORS" no navegador)', async () => {
+  globalThis.fetch = async () => new Response(null, { status: 302, headers: { Location: 'https://interno.local/' } });
+  const r1 = await askProxy('https://lrclib.net/api/search?q=x');
+  globalThis.fetch = async () => { throw new TypeError('fetch failed'); };
+  const r2 = await askProxy('https://lrclib.net/api/search?q=x');
+  globalThis.fetch = async () => { throw Object.assign(new Error('t'), { name: 'TimeoutError' }); };
+  const r3 = await askProxy('https://lrclib.net/api/search?q=x');
+  assert(r1.status === 502 && r2.status === 502 && r3.status === 504, `${r1.status} ${r2.status} ${r3.status}`);
+  assert([r1, r2, r3].every((r) => r.headers.get('Access-Control-Allow-Origin') === ORIGIN), 'sem CORS');
 });
 
 console.log(`\n${passed} passaram, ${failed} falharam\n`);

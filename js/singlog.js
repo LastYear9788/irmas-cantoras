@@ -8,14 +8,15 @@ const MAX_ROWS = 30000;   // ~20 min a 25x/s
 const COLS = ['t', 'lt', 'a', 'mine', 'yt', 'rms', 'th', 'fl', 'pk', 'p', 'c', 'v', 'ld', 'dt', 'pr', 'src'];
 const r = (x, k) => Math.round((Number(x) || 0) * k);
 
-/** clock = relógio em ms (dá pra trocar nos testes) */
-export function createLog(meta, clock = Date.now) {
+/** clock = relógio em ms (dá pra trocar nos testes). É o relógio "que só anda pra frente"
+ *  (performance.now): se o Windows acertar a hora no meio da música, a linha do tempo não pula. */
+export function createLog(meta, clock = () => performance.now()) {
   const cols = {};
   COLS.forEach((c) => { cols[c] = []; });
   const t0 = clock();
   const log = {
     format: 'irmas-cantoras-log/1',
-    meta: { ...meta, startedAt: new Date(t0).toISOString() },
+    meta: { ...meta, startedAt: new Date().toISOString() },
     // legenda das colunas (pra quem abrir o arquivo)
     legend: {
       t: 'ms desde o início', lt: 'tempo da letra (s)', a: 'linha tocando (-1 = nenhuma)', mine: '1 = linha é minha',
@@ -31,7 +32,7 @@ export function createLog(meta, clock = Date.now) {
     tick(o) {
       if (log.rows >= MAX_ROWS) { log.truncated = true; return; }
       log.rows++;
-      cols.t.push(clock() - t0);
+      cols.t.push(Math.round(clock() - t0));
       cols.lt.push(Math.round((o.lt || 0) * 100) / 100);
       cols.a.push(o.active);
       cols.mine.push(o.mine ? 1 : 0);
@@ -49,9 +50,13 @@ export function createLog(meta, clock = Date.now) {
       cols.src.push(o.src === 'mon' ? 'o' : 'm');
     },
     event(type, data) {
-      if (log.ev.length < 5000) log.ev.push([clock() - t0, type, data === undefined ? null : data]);
+      if (log.ev.length < 5000) log.ev.push([Math.round(clock() - t0), type, data === undefined ? null : data]);
     },
-    finish(extra) { log.meta.endedAt = new Date().toISOString(); Object.assign(log, extra || {}); },
+    finish(extra) {
+      log.meta.endedAt = new Date().toISOString();
+      log.meta.durationMs = Math.round(clock() - t0);
+      Object.assign(log, extra || {});
+    },
     toJSON() {
       const { tick, event, finish, toJSON, ...plain } = log;
       return plain;
@@ -60,11 +65,45 @@ export function createLog(meta, clock = Date.now) {
   return log;
 }
 
-/** guarda o último relatório no navegador (sobrevive a fechar a aba sem querer) */
-export function saveLog(log) {
-  try { localStorage.setItem(KEY, JSON.stringify(log)); return true; } catch (e) { return false; }
+// O relatório fica no IndexedDB: guardar não trava a música (o localStorage é síncrono e,
+// com ~2 MB de relatório, dava engasgo a cada 30 s e podia estourar o limite de 5 MB do site).
+const DB_NAME = 'irmas-cantoras', STORE = 'logs';
+let dbP = null;
+function openDb() {
+  if (dbP) return dbP;
+  dbP = new Promise((resolve, reject) => {
+    if (typeof indexedDB === 'undefined') return reject(new Error('sem IndexedDB'));
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore(STORE);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+    req.onblocked = () => reject(new Error('IndexedDB bloqueado'));
+  });
+  dbP.catch(() => { dbP = null; });
+  return dbP;
 }
-export function lastLog() {
+function idb(mode, fn) {
+  return openDb().then((db) => new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, mode);
+    const req = fn(tx.objectStore(STORE));
+    tx.oncomplete = () => resolve(req.result);
+    tx.onerror = tx.onabort = () => reject(tx.error || new Error('IndexedDB'));
+  }));
+}
+
+/** guarda o último relatório no navegador (sobrevive a fechar a aba sem querer). Devolve Promise<boolean>. */
+export async function saveLog(log) {
+  const plain = log && typeof log.toJSON === 'function' ? log.toJSON() : log;
+  try {
+    await idb('readwrite', (st) => st.put(plain, 'last'));
+    try { localStorage.removeItem(KEY); } catch (e) { /* ok */ }   // não deixa um relatório velho lá
+    return true;
+  } catch (e) {
+    try { localStorage.setItem(KEY, JSON.stringify(plain)); return true; } catch (e2) { return false; }
+  }
+}
+export async function lastLog() {
+  try { const v = await idb('readonly', (st) => st.get('last')); if (v) return v; } catch (e) { /* sem IndexedDB */ }
   try { const s = localStorage.getItem(KEY); return s ? JSON.parse(s) : null; } catch (e) { return null; }
 }
 /** baixa o relatório como arquivo .json */

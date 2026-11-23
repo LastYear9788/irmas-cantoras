@@ -3,25 +3,42 @@
 
 export const ALL = -1;
 
-const norm = (s) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
+// preserva qualquer alfabeto (latino, japonês, coreano, chinês, cirílico, grego…)
+const norm = (s) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^\p{L}\p{N} ]/gu, '').replace(/\s+/g, ' ').trim();
 
 export function assignParts(lines, mode, playerCount) {
   if (mode === 'together' || playerCount < 2) return lines.map(() => ALL);
 
   // linhas que se repetem na música (provavelmente refrão)
-  const count = {};
-  lines.forEach((ln) => { const k = norm(ln.text); count[k] = (count[k] || 0) + 1; });
-  const rep = lines.map((ln) => count[norm(ln.text)] >= 2);
+  // Object.create(null): palavras como "constructor" ou "toString" não colidem com o protótipo
+  const count = Object.create(null);
+  const keys = lines.map((ln) => norm(ln.text));
+  keys.forEach((k) => { if (k) count[k] = (count[k] || 0) + 1; });
+  const rep = keys.map((k) => !!k && count[k] >= 2);
 
-  // 1) agrupa em blocos: quebra em pausas > 3s, a cada 4 linhas, ou quando entra/sai do refrão
-  const blocks = [];
+  // 1) agrupa primeiro em estrofes naturais (pausa > 3s ou entra/sai do refrão)
+  const sections = [];
   let cur = [];
   lines.forEach((ln, i) => {
     const gap = i > 0 ? ln.t - lines[i - 1].end : 0;
-    if (cur.length && (gap > 3 || cur.length >= 4 || rep[i] !== rep[i - 1])) { blocks.push(cur); cur = []; }
+    if (cur.length && (gap > 3 || rep[i] !== rep[i - 1])) { sections.push(cur); cur = []; }
     cur.push(i);
   });
-  if (cur.length) blocks.push(cur);
+  if (cur.length) sections.push(cur);
+
+  // estrofe com mais de 4 linhas: divide em pedaços equilibrados (5 → 3+2, 6 → 3+3, em vez de 4+1)
+  const blocks = [];
+  sections.forEach((sec) => {
+    const n = sec.length;
+    if (n <= 4) { blocks.push(sec); return; }
+    const k = Math.ceil(n / 4);
+    let pos = 0;
+    for (let c = 0; c < k; c++) {
+      const len = Math.floor(n / k) + (c < n % k ? 1 : 0);
+      blocks.push(sec.slice(pos, pos + len));
+      pos += len;
+    }
+  });
 
   // 2) refrão = bloco de linhas repetidas -> todas juntas
   const isChorus = blocks.map((b) => rep[b[0]]);

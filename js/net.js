@@ -26,9 +26,15 @@ const NO_PEER = 'Não consegui carregar o sistema de salas. Confere a internet e
 const handlers = {};
 
 /** "crachá" deste navegador/aba: se der F5 e voltar, a sala sabe que é a mesma pessoa */
+let memToken = '';   // se o navegador bloquear o armazenamento, vale só enquanto a aba estiver aberta
 function clientToken() {
-  let t = sessionStorage.getItem('ic-token');
-  if (!t) { t = Math.random().toString(36).slice(2) + Date.now().toString(36); sessionStorage.setItem('ic-token', t); }
+  let t = '';
+  try { t = sessionStorage.getItem('ic-token') || ''; } catch (e) { /* bloqueado */ }
+  if (!t) t = memToken;
+  if (!t) {
+    t = memToken = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    try { sessionStorage.setItem('ic-token', t); } catch (e) { /* ok */ }
+  }
   return t;
 }
 let peer = null;
@@ -50,7 +56,7 @@ export const net = {
 
   /** manda pra todo mundo, inclusive pra mim */
   broadcast(msg) {
-    msg.from = net.myId;
+    msg = { ...msg, from: net.myId };   // cópia: não mexe no objeto de quem chamou
     if (net.isHost) {
       deliver(msg);
       for (const c of conns.values()) safeSend(c, msg);
@@ -63,11 +69,22 @@ export const net = {
   createRoom(name) {
     if (typeof Peer === 'undefined') return Promise.reject(new Error(NO_PEER));
     return new Promise((resolve, reject) => {
-      let tries = 0;
+      let tries = 0, done = false, cur = null;
+      // servidor de conexão travado: não fica "Criando sala…" pra sempre
+      const timer = setTimeout(() => {
+        if (done) return;
+        done = true;
+        try { if (cur) cur.destroy(); } catch (e) { /* ok */ }
+        reject('Não consegui criar a sala (o servidor de conexão não respondeu). Confere a internet e tenta de novo.');
+      }, 15000);
       const attempt = () => {
         const code = randomCode();
-        const p = new Peer(PREFIX + code, PEER_OPTS);
+        const p = cur = new Peer(PREFIX + code, PEER_OPTS);
         p.on('open', (id) => {
+          if (peer === p) { reconnectTries = 0; return; }   // voltou depois de cair: a sala continua igual
+          if (done) { p.destroy(); return; }
+          done = true;
+          clearTimeout(timer);
           peer = p;
           net.isHost = true;
           net.myId = id;
@@ -75,15 +92,16 @@ export const net = {
           tokens.clear();
           net.players = [{ id, name: cleanName(name), ready: false }];
           p.on('connection', onGuestConnection);
-          p.on('disconnected', () => p.reconnect());
+          p.on('disconnected', () => scheduleReconnect(p));
           emit('players', net.players);
           resolve(code);
         });
         p.on('error', (err) => {
           if (peer === p) return emit('neterror', err);
           p.destroy();
+          if (done) return;
           if (err.type === 'unavailable-id' && tries++ < 5) attempt();
-          else reject(friendlyError(err));
+          else { done = true; clearTimeout(timer); reject(friendlyError(err)); }
         });
       };
       attempt();
@@ -105,6 +123,7 @@ export const net = {
         fail(friendlyError(err));
       });
       p.on('open', (id) => {
+        if (done) return;   // (reconexão com o servidor: a conexão com a sala já existe)
         const c = p.connect(PREFIX + code, { reliable: true });
         c.on('open', () => {
           clearTimeout(timer);
@@ -116,6 +135,8 @@ export const net = {
           net.code = code;
           safeSend(c, { type: 'hello', name, token: clientToken() });
           syncClock();
+          // só vigia depois de entrar: se a tentativa falhar, o erro já aparece (sem "a dona saiu" + recarregar)
+          watchConn(c, () => emit('hostgone'));
           resolve(code);
         });
         c.on('data', (msg) => {
@@ -124,10 +145,13 @@ export const net = {
           if (msg.type === 'hb') return safeSend(c, { type: 'hbr' });
           if (msg.type === 'hbr') return;
           if (msg.type === 'pong') return onPong(msg);
-          if (msg.type === 'players') net.players = msg.players;
+          if (msg.type === 'players') {
+            if (!Array.isArray(msg.players)) return;
+            net.players = msg.players;
+            return emit('players', net.players);   // igual na dona e na convidada: a lista
+          }
           deliver(msg);
         });
-        watchConn(c, () => emit('hostgone'));
       });
     });
   },
@@ -145,6 +169,16 @@ export const net = {
 };
 
 /* ---------------- interno ---------------- */
+
+// caiu a conexão com o servidor do PeerJS: tenta voltar com calma (1s, 2s, 4s… até 30s), não em loop
+let reconnectTries = 0;
+function scheduleReconnect(p) {
+  const wait = Math.min(30000, 1000 * 2 ** Math.min(reconnectTries++, 5));
+  setTimeout(() => {
+    if (p.destroyed || !p.disconnected) return;
+    try { p.reconnect(); } catch (e) { /* tenta de novo no próximo "disconnected" */ }
+  }, wait);
+}
 
 function emit(type, data) { (handlers[type] || []).forEach((fn) => fn(data)); }
 function deliver(msg) { emit(msg.type, msg); }
@@ -209,7 +243,8 @@ function onGuestConnection(c) {
       }
       default:
         // convidadas só podem mandar a nota ao vivo e a final (comandos de jogo são só da dona da sala)
-        if (msg._relay && GUEST_CAN_SEND.has(msg.type) && sizeOk(msg)) {
+        // (e só de quem já entrou na sala com "hello")
+        if (msg._relay && conns.get(c.peer) === c && GUEST_CAN_SEND.has(msg.type) && sizeOk(msg)) {
           delete msg._relay;
           msg.from = c.peer;
           deliver(msg);
@@ -273,6 +308,7 @@ function syncClock() {
   for (let i = 0; i < 5; i++) setTimeout(() => safeSend(hostConn, { type: 'ping', t0: Date.now() }), i * 300);
 }
 function onPong({ t0, th }) {
+  if (!Number.isFinite(t0) || !Number.isFinite(th)) return;   // resposta estranha: não estraga o relógio
   const t1 = Date.now();
   pingResults.push({ rtt: t1 - t0, offset: th - (t0 + t1) / 2 });
   pingResults.sort((a, b) => a.rtt - b.rtt);

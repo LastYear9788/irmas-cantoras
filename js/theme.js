@@ -1,12 +1,14 @@
 // Escolha do visual: "Novo" (bolhas + vidro líquido) ou "Clássico", + controle do Modo Leve. Fica salvo no navegador.
-import { startBubbles, stopBubbles, pauseBubbles, freezeBubbles, unfreezeBubbles, onSlow } from './bubbles.js?v=22';
-import { enableLiquid, disableLiquid } from './liquid.js?v=22';
+import { startBubbles, stopBubbles, pauseBubbles, freezeBubbles, unfreezeBubbles, onSlow } from './bubbles.js?v=23';
+import { enableLiquid, disableLiquid } from './liquid.js?v=23';
 
 const btn = document.getElementById('btn-theme');
 const btnLite = document.getElementById('btn-lite');
-let theme = localStorage.getItem('ic-theme') === 'classic' ? 'classic' : 'new';
+let theme = 'new';
+try { if (localStorage.getItem('ic-theme') === 'classic') theme = 'classic'; } catch (e) { /* armazenamento bloqueado */ }
 
 let lite = document.documentElement.classList.contains('lite');
+let liquidSlow = false;   // o PC pesou um pouco: só o vidro líquido foi desligado (ainda não é o Modo leve)
 const userForcedFull = () => { try { return localStorage.getItem('ic-lite') === '0'; } catch (e) { return false; } };
 
 function renderLiteBtn() {
@@ -27,6 +29,7 @@ const goLite = () => {
 
 const exitLite = () => {
   lite = false;
+  liquidSlow = false;
   document.documentElement.classList.remove('lite', 'still');
   unfreezeBubbles();
   apply();
@@ -37,14 +40,14 @@ addEventListener('ic-lite', goLite);
 
 function apply() {
   document.documentElement.classList.toggle('theme-new', theme === 'new');
-  if (theme === 'new') { startBubbles(); if (!lite) enableLiquid(); } else { stopBubbles(); disableLiquid(); }
+  if (theme === 'new') { startBubbles(); if (!lite && !liquidSlow) enableLiquid(); } else { stopBubbles(); disableLiquid(); }
   btn.textContent = theme === 'new' ? '🎨 Visual: Novo' : '🎨 Visual: Clássico';
   btn.title = theme === 'new' ? 'Trocar pro visual clássico' : 'Trocar pro visual novo';
 }
 
 btn.onclick = () => {
   theme = theme === 'new' ? 'classic' : 'new';
-  localStorage.setItem('ic-theme', theme);
+  try { localStorage.setItem('ic-theme', theme); } catch (e) { /* ok */ }
   apply();
 };
 
@@ -60,6 +63,7 @@ if (btnLite) {
   };
 }
 
+if (lite) freezeBubbles();   // já abre no modo leve: as bolhas nem começam a se mexer
 apply();
 renderLiteBtn();
 
@@ -67,7 +71,8 @@ renderLiteBtn();
 // (respeita se o usuário desligou o modo leve manualmente)
 onSlow((level) => {
   if (userForcedFull()) return;
-  if (level === 1) { lite = true; disableLiquid(); renderLiteBtn(); }
+  // nível 1 só tira o vidro líquido; o botão continua dizendo a verdade (Modo leve ainda desligado)
+  if (level === 1) { liquidSlow = true; disableLiquid(); }
   else {
     try { localStorage.setItem('ic-lite', '1'); } catch (e) { /* ok */ }
     goLite();

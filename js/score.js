@@ -18,6 +18,7 @@
 // qualidade de quem está cantando (a soma dá 1); o Fôlego multiplica: cantar metade da linha vale metade
 const Q = { tune: 0.43, timbre: 0.27, rhythm: 0.3 };
 const MIN_LINE = 0.4;   // linhas mais curtas que isso não contam (nem pra mais, nem pra menos)
+const MIN_MEASURED = 0.6;   // se o app mediu menos que 60% das linhas que tocaram, o que falta acima disso vale 0
 const MAX_DT = 1.2;     // um "pulo" maior que isso (vídeo travou, pulou) não conta como tempo cantado
 const BINS = 120;       // histograma das notas: 10 cents por casa, uma oitava
 const MAJOR = [0, 2, 4, 5, 7, 9, 11];
@@ -36,7 +37,8 @@ export class Scorer {
   constructor(lines, who, myIndex, opts = {}) {
     this.lines = lines;
     this.latency = opts.latency || 0;
-    this.mine = lines.map((_, i) => who[i] === -1 || who[i] === myIndex);
+    // myIndex -1 = só assistindo (não confundir com -1 = ALL, "todas cantam")
+    this.mine = lines.map((_, i) => myIndex >= 0 && (who[i] === -1 || who[i] === myIndex));
     this.stats = lines.map((ln) => {
       const dur = ln.end - ln.t, syl = syllables(ln.text);
       return {
@@ -49,6 +51,7 @@ export class Scorer {
       };
     });
     this.reached = -1;   // última linha que já tocou
+    this.cur = -1;       // linha da última leitura
     this.resetVoice();
   }
 
@@ -60,6 +63,9 @@ export class Scorer {
   /** lineIdx = linha atual (ou -1), lt = tempo da letra, m = leitura do microfone, dt = segundos desde a última chamada */
   frame(lineIdx, lt, m, dt = 1 / 60) {
     if (lineIdx > this.reached) this.reached = lineIdx;
+    // linha nova (mesmo emendada na anterior, sem pausa): começa a contar sílabas e notas do zero,
+    // senão a primeira sílaba da linha nova se perdia quando a voz estava alta na troca
+    if (lineIdx !== this.cur) { this.cur = lineIdx; this.resetVoice(); }
     if (lineIdx < 0 || !this.mine[lineIdx]) { this.resetVoice(); return; }
     dt = Math.max(0, Math.min(MAX_DT, dt || 0));
     if (!dt) return;
@@ -238,7 +244,9 @@ export class Scorer {
     return {
       // se encerrarem antes do fim, conta só o pedaço que tocou; e linha que o app nem chegou a
       // medir (vídeo carregando, PC engasgou bem na hora) não conta contra a jogadora
-      total: Math.min(10000, Math.round((this.sum(ctx) / this.countable(this.reached, ctx)) * 10000)),
+      // …mas com um piso: travar quase a música toda e cantar 2 linhas não vira nota cheia
+      total: Math.min(10000, Math.round((this.sum(ctx) / Math.max(
+        this.countable(this.reached, ctx), Math.round(MIN_MEASURED * this.countable(this.reached)))) * 10000)),
       presence: pct('presence'), tune: pct('tune'), timbre: pct('timbre'), rhythm: pct('rhythm'),
       perfect,
     };

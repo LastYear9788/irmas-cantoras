@@ -1,5 +1,5 @@
 // Microfone: volume e altura (pitch) da voz, direto no navegador.
-import { detectPitch, VoiceGate, SignalWatch } from './pitch.js?v=22';
+import { VoiceGate, SignalWatch, fftSizeFor, decimationFor, detectPitchDecimated } from './pitch.js?v=23';
 
 const CFG_KEY = 'ic-mic-cfg';
 
@@ -28,7 +28,9 @@ let ctx = null, analyser = null, buf = null, half = null, stream = null, src = n
 let monGain = null;           // monitoramento direto quando o stream já está em rawMode (sem abrir 2º microfone)
 let mon = null, monToken = 0; // "me ouvir" separado quando o stream principal usa echoCancellation
 let activeRaw = false;        // se o stream atual foi aberto sem filtros do navegador
-let activeDeviceId = '';
+let activeDeviceId = '';      // o aparelho que o navegador abriu de verdade (pro "Me ouvir" abrir o mesmo)
+let wantedDeviceId = '';      // o que foi pedido ("" = padrão do sistema): é com isso que se compara
+let startP = null;            // ligando o microfone agora (2 cliques seguidos não abrem 2 microfones)
 
 function stopMonitor() {
   if (monGain) {
@@ -38,8 +40,13 @@ function stopMonitor() {
   if (!mon) return;
   const old = mon;
   mon = null;
-  old.s.getTracks().forEach((t) => t.stop());
   try { old.c.close(); } catch (e) { /* ok */ }
+  // desligou "Me ouvir" no meio da música: a gravação usa esse áudio, então só fecha quando ela acabar
+  if (recorder && recorder.src === old.s && recorder.state !== 'inactive') { recorder.hold = old.s; return; }
+  old.s.getTracks().forEach((t) => t.stop());
+}
+function releaseRec(r) {
+  if (r && r.hold) { r.hold.getTracks().forEach((t) => t.stop()); r.hold = null; }
 }
 
 let recorder = null;
@@ -50,11 +57,7 @@ let readCost = 0;         // quanto tempo (ms) uma leitura leva, média
 
 const OFF = { rms: 0, level: 0, pitch: 0, voiced: false, loud: false, clarity: 0, peak: 0, dc: 0, threshold: 0.008 };
 
-function pickFftSize(rate) {
-  if (rate <= 12000) return 512;
-  if (rate <= 24000) return 1024;
-  return 2048;
-}
+const pickFftSize = fftSizeFor;
 
 function makeGate() {
   const g = new VoiceGate();
@@ -89,9 +92,18 @@ function source(now) {
   return { c: ctx, an: analyser, b: buf, h: half, g: gate, w: watch, s: stream };
 }
 
+/** sem navigator.mediaDevices: aberto por http:// num IP da rede (não tem "cadeado" pra clicar) */
+export function mediaUnavailableMsg(what) {
+  if (typeof isSecureContext !== 'undefined' && !isSecureContext) {
+    return `${what} só funciona em endereço seguro: abre o site pelo link https:// (ou em localhost, no próprio PC).`;
+  }
+  return `Esse navegador não deixa usar ${what === 'O microfone' ? 'o microfone' : 'a câmera'}. Usa o Chrome ou o Edge atualizado.`;
+}
+
 export const mic = {
   active: false,
   onLost: null,
+  onMonitorFail: null,   // "Me ouvir" não conseguiu abrir o microfone de novo (o botão tem que desligar)
 
   getConfig() { return { ...cfg }; },
 
@@ -120,12 +132,19 @@ export const mic = {
   },
 
   async start(opts = {}) {
+    while (startP) { try { await startP; } catch (e) { /* a outra tentativa falhou: tenta a nossa */ } }
+    startP = mic._open(opts);
+    try { return await startP; } finally { startP = null; }
+  },
+
+  async _open(opts = {}) {
     const wantRaw = opts.rawMode !== undefined ? !!opts.rawMode : cfg.rawMode;
     const wantDev = opts.deviceId !== undefined ? String(opts.deviceId || '') : cfg.deviceId;
     if (mic.active) {
-      if (wantRaw === activeRaw && wantDev === activeDeviceId) return;
+      if (wantRaw === activeRaw && wantDev === wantedDeviceId) return;
       mic.stop();
     }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error(mediaUnavailableMsg('O microfone'));
     try {
       stream = await navigator.mediaDevices.getUserMedia({
         audio: buildAudioConstraints(wantRaw, wantDev),
@@ -144,12 +163,13 @@ export const mic = {
     analyser.fftSize = pickFftSize(ctx.sampleRate);
     src.connect(analyser);
     buf = new Float32Array(analyser.fftSize);
-    half = new Float32Array(analyser.fftSize / 2);
+    half = new Float32Array(analyser.fftSize / decimationFor(ctx.sampleRate));
     gate = makeGate();
     activeRaw = wantRaw;
     const tr = stream.getAudioTracks()[0];
     const st = tr && tr.getSettings ? tr.getSettings() : {};
     activeDeviceId = wantDev || st.deviceId || '';
+    wantedDeviceId = wantDev;
     last = null; lastAt = 0; watch.reset();
     mic.active = true;
     // fio puxado / fone bluetooth desligou
@@ -215,13 +235,16 @@ export const mic = {
       an.fftSize = pickFftSize(c.sampleRate);
       source.connect(an);
       if (c.state === 'suspended') c.resume().catch(() => {});
-      const entry = { s, c, an, buf: new Float32Array(an.fftSize), half: new Float32Array(an.fftSize / 2), gate: makeGate(), watch: new SignalWatch() };
+      const entry = { s, c, an, buf: new Float32Array(an.fftSize), half: new Float32Array(an.fftSize / decimationFor(c.sampleRate)), gate: makeGate(), watch: new SignalWatch() };
       s.getAudioTracks().forEach((t) => t.addEventListener('ended', () => {
         if (mon === entry) { stopMonitor(); last = null; }
       }));
       mon = entry;
       last = null;
-    }).catch(() => { /* sem permissão: só não toca */ });
+    }).catch(() => {
+      // não deu pra abrir o caminho do fone: avisa (senão o botão ficava "Me ouvindo" sem tocar nada)
+      if (token === monToken && mic.onMonitorFail) mic.onMonitorFail();
+    });
   },
 
   /** Começa a gravar a voz (pra ouvir no final). Usa o stream limpo se "Me ouvir" estiver ligado. */
@@ -233,6 +256,7 @@ export const mic = {
     try {
       const type = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'].find((t) => MediaRecorder.isTypeSupported(t));
       recorder = new MediaRecorder(recStream, type ? { mimeType: type, audioBitsPerSecond: 96000 } : undefined);
+      recorder.src = recStream;
       const chunks = recorder.chunks = [];
       recorder.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
       recorder.start(1000);
@@ -243,15 +267,19 @@ export const mic = {
   /** Para de gravar e devolve o áudio (Blob) ou null. */
   recStop() {
     const r = recorder; recorder = null;
-    if (!r || r.state === 'inactive') return Promise.resolve(null);
+    if (!r) return Promise.resolve(null);
+    const blob = () => { releaseRec(r); return r.chunks.length ? new Blob(r.chunks, { type: r.mimeType || 'audio/webm' }) : null; };
+    // já tinha parado sozinho (microfone desconectou perto do fim): aproveita o que gravou
+    if (r.state === 'inactive') return Promise.resolve(blob());
     return new Promise((resolve) => {
-      r.onstop = () => resolve(r.chunks.length ? new Blob(r.chunks, { type: r.mimeType || 'audio/webm' }) : null);
-      try { r.stop(); } catch (e) { resolve(null); }
+      r.onstop = () => resolve(blob());
+      try { r.stop(); } catch (e) { resolve(blob()); }
     });
   },
 
   recCancel() {
     if (recorder && recorder.state !== 'inactive') { recorder.ondataavailable = null; try { recorder.stop(); } catch (e) { /* ok */ } }
+    releaseRec(recorder);
     recorder = null;
   },
 
@@ -262,15 +290,20 @@ export const mic = {
   read(needPitch = true) {
     if (!mic.active) return OFF;
     const now = performance.now();
-    // ~30 leituras por segundo bastam (e poupam PC fraco: a afinação é a conta mais pesada do jogo)
-    if (last && now - lastAt < 30 && (!needPitch || last._hasPitch)) return last;
+    // ~30 leituras por segundo bastam (e poupam PC fraco: a afinação é a conta mais pesada do jogo).
+    // Durante a música a barrinha (60x/s, sem afinação) reaproveita a leitura completa do placar
+    // (25x/s): antes ela lia de novo e o placar, logo depois, tinha que ler outra vez.
+    if (last && (needPitch ? last._hasPitch && now - lastAt < 30 : now - lastAt < (last._hasPitch ? 60 : 30))) return last;
     lastAt = now;
     // "Me ouvir" ficou de fora por estar mudo/travado: continua espiando, pra voltar quando ele acordar
     if (mon && mon.c.state === 'running' && mon.watch.problem(now)) {
       mon.an.getFloatTimeDomainData(mon.buf);
-      let mp = 0;
-      for (let i = 0; i < mon.buf.length; i++) { const v = Math.abs(mon.buf[i]); if (v > mp) mp = v; }
-      mon.watch.update(mp, mp, mp ? sampleSig(mon.buf) : null, now);
+      // igual à leitura normal: tira o deslocamento DC antes do pico (senão um mic mudo com DC parecia "vivo")
+      let mm = 0, raw = 0, mp = 0;
+      for (let i = 0; i < mon.buf.length; i++) { const v = mon.buf[i]; mm += v; if (Math.abs(v) > raw) raw = Math.abs(v); }
+      mm /= mon.buf.length;
+      for (let i = 0; i < mon.buf.length; i++) { const v = Math.abs(mon.buf[i] - mm); if (v > mp) mp = v; }
+      mon.watch.update(raw, mp, raw ? sampleSig(mon.buf) : null, now);
     }
     const { c, an, b, h, g, w } = source(now);
     if (!c || !an || !b) return OFF;
@@ -308,14 +341,8 @@ export const mic = {
 
     let pitch = 0, clarity = 0;
     if (rms > th) {
-      // metade das amostras (média de 2 em 2): voz vai até ~1100 Hz, então 24 mil por segundo sobra
-      let r;
-      if (c.sampleRate >= 32000) {
-        for (let i = 0; i < h.length; i++) h[i] = (b[2 * i] + b[2 * i + 1]) * 0.5;
-        r = detectPitch(h, c.sampleRate / 2);
-      } else {
-        r = detectPitch(b, c.sampleRate);
-      }
+      // junta as amostras (média de 2 em 2 a 48 kHz, de 4 em 4 a 96 kHz…): ~24 mil por segundo sobra pra voz
+      const r = detectPitchDecimated(b, c.sampleRate, h);
       pitch = r.pitch; clarity = r.clarity;
     }
     const { loud, voiced } = g.update(rms, pitch);

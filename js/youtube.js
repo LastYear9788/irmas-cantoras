@@ -6,31 +6,55 @@ let stateListeners = [];
 let errorListener = null;
 let cancelPrepare = null;
 
+const ID_RE = /^[\w-]{11}$/;
+const YT_HOST = /^(?:(?:www|m|music)\.)?youtube(?:-nocookie)?\.com$/;
+
 export function extractVideoId(text) {
   text = (text || '').trim();
-  const m = text.match(/(?:v=|\/v\/|youtu\.be\/|\/shorts\/|\/embed\/|\/live\/)([\w-]{11})/);
-  if (m) return m[1];
-  if (/^[\w-]{11}$/.test(text)) return text;
-  return null;
+  if (!text) return null;
+  if (ID_RE.test(text)) return text;
+  // colou uma mensagem com texto + link (ex.: vinda do WhatsApp): pega só o endereço
+  if (/\s/.test(text)) {
+    const m = text.match(/https?:\/\/\S+/i);
+    if (!m) return null;
+    text = m[0];
+  }
+  let u;
+  try { u = new URL(/^https?:\/\//i.test(text) ? text : 'https://' + text); }
+  catch (e) { return null; }
+  const host = u.hostname.toLowerCase();
+  if (host === 'youtu.be') {
+    const id = u.pathname.replace(/^\/+/, '').split('/')[0];
+    return ID_RE.test(id) ? id : null;
+  }
+  if (!YT_HOST.test(host)) return null;
+  const v = u.searchParams.get('v');
+  if (v !== null) return ID_RE.test(v) ? v : null;
+  const m = u.pathname.match(/^\/(?:v|shorts|embed|live)\/([\w-]{11})(?:\/|$)/);
+  return m ? m[1] : null;
 }
 
 export function thumbUrl(id) { return `https://i.ytimg.com/vi/${id}/hqdefault.jpg`; }
 
 function loadApi() {
   if (apiReady) return apiReady;
-  apiReady = new Promise((resolve) => {
+  apiReady = new Promise((resolve, reject) => {
     window.onYouTubeIframeAPIReady = resolve;
     const s = document.createElement('script');
     s.src = 'https://www.youtube.com/iframe_api';
+    // internet oscilou: esquece a tentativa, pra próxima música tentar baixar de novo (sem F5)
+    s.onerror = () => { apiReady = null; s.remove(); reject(new Error('Não consegui abrir o YouTube. Confere a internet e tenta de novo.')); };
     document.head.appendChild(s);
   });
   return apiReady;
 }
 
+let playerP = null;   // criando o player agora (2 pedidos juntos não criam 2 players)
 async function getPlayer() {
   await loadApi();
   if (player) return player;
-  return new Promise((resolve) => {
+  if (playerP) return playerP;
+  playerP = new Promise((resolve) => {
     const p = new YT.Player('yt', {
       width: '1280', height: '720',
       playerVars: {
@@ -48,6 +72,7 @@ async function getPlayer() {
       },
     });
   });
+  return playerP;
 }
 
 export function onState(fn) { stateListeners.push(fn); }
@@ -93,6 +118,8 @@ export async function prepare(videoId) {
       const d = p.getDuration();
       const data = p.getVideoData() || {};
       if (!(d > 0 && data.title)) return;
+      // logo depois de trocar de vídeo, o player ainda responde com o nome/duração do ANTERIOR
+      if (data.video_id && data.video_id !== videoId) return;
       const info = { title: data.title, author: data.author || '', duration: d };
       if (st === YT.PlayerState.PLAYING) {
         p.pauseVideo();
@@ -122,7 +149,7 @@ export function rewind() {
   if (!player) return;
   const st = player.getPlayerState();
   // inclui "terminou" (0): sem isso, a revanche achava que a música já tinha acabado
-  if (st === 0 || st === 1 || st === 2 || st === 3) { player.seekTo(0, true); player.pauseVideo(); }
+  if (st === 0 || st === 1 || st === 2 || st === 3) { tRaw = -1; player.seekTo(0, true); player.pauseVideo(); }
 }
 export function seek(t) { tRaw = -1; if (player) player.seekTo(Math.max(0, t), true); }
 // O tempo que o YouTube informa anda "aos pulinhos" (principalmente em PC fraco).

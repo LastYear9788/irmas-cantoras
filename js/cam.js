@@ -1,4 +1,5 @@
 // Câmera (opcional): tira fotos pequenas durante a música. Nada é guardado — só fica na memória.
+import { mediaUnavailableMsg } from './mic.js?v=23';
 
 let stream = null;
 let video = null;       // vídeo "invisível" usado pra tirar as fotos
@@ -11,6 +12,7 @@ export const cam = {
   /** liga a câmera e mostra a prévia no elemento <video> passado */
   async start(preview) {
     if (cam.active) return;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error(mediaUnavailableMsg('A câmera'));
     try {
       stream = await navigator.mediaDevices.getUserMedia({
         video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
@@ -26,11 +28,17 @@ export const cam = {
     video = document.createElement('video');
     video.muted = true;
     video.playsInline = true;
+    // na página (minúsculo e invisível): alguns navegadores param de atualizar vídeo fora da página → foto preta
+    video.setAttribute('aria-hidden', 'true');
+    video.style.cssText = 'position:fixed;left:0;top:0;width:2px;height:2px;opacity:0;pointer-events:none;z-index:-1';
+    document.body.appendChild(video);
     video.srcObject = stream;
     await video.play().catch(() => {});
     if (preview) { preview.srcObject = stream; preview.play().catch(() => {}); }
     cam.active = true;
+    const mine = stream;
     stream.getVideoTracks().forEach((t) => t.addEventListener('ended', () => {
+      if (stream !== mine) return;   // câmera antiga (já desligada e religada): não derruba a nova
       cam.stop(preview);
       if (cam.onLost) cam.onLost();
     }));
@@ -39,6 +47,7 @@ export const cam = {
   stop(preview) {
     if (stream) stream.getTracks().forEach((t) => t.stop());
     stream = null;
+    if (video) { video.srcObject = null; video.remove(); }
     video = null;
     if (preview) preview.srcObject = null;
     cam.active = false;

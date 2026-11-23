@@ -73,8 +73,8 @@ function search(params) {
 }
 
 /* ---------- conferir se é a mesma música (pelo nome) ---------- */
-const normName = (x) => (x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-  .replace(/\(.*?\)|\[.*?\]/g, ' ').replace(/[^a-z0-9\u3040-\u9fff ]/g, ' ').replace(/\s+/g, ' ').trim();
+export const normName = (x) => (x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  .replace(/\(.*?\)|\[.*?\]/g, ' ').replace(/[^a-z0-9\u0370-\u03ff\u0400-\u04ff\u1100-\u11ff\u3040-\u9fff\uac00-\ud7af ]/g, ' ').replace(/\s+/g, ' ').trim();
 
 /** o nome da música encontrada tem que aparecer no título do vídeo (e o artista também, se der) */
 let relaxed = false;   // 2ª tentativa: o título do vídeo não tem o nome do artista (ex: canal de TV)
@@ -97,6 +97,7 @@ let proxyIdx = 0;
 
 // tempo máximo da busca inteira (pra nunca ficar "Procurando a letra…" pra sempre)
 let deadline = Infinity;
+let searchGen = 0;   // número da busca mais nova
 const outOfTime = () => Date.now() > deadline;
 
 async function fetchJSON(url, opts = {}, ms = 6000) {
@@ -133,9 +134,11 @@ async function proxiedNow(url, opts) {
       proxyIdx = i;           // lembra qual funcionou
       return data;
     } catch (e) {
-      // "muitos pedidos", erro do servidor ou travou: deixa esse de lado por 2 minutos
+      // "muitos pedidos", erro do servidor, travou, caiu (erro de rede/CORS), recusou (403) ou
+      // devolveu algo que não é JSON (página de erro): deixa esse de lado por 2 minutos
       if (e.byDeadline) throw e;
-      if (e.status === 429 || e.status >= 500 || e.name === 'AbortError') px.deadUntil = Date.now() + 120000;
+      if (e.status === 429 || e.status >= 500 || e.status === 403 || e.name === 'AbortError'
+        || e.name === 'TypeError' || e.name === 'SyntaxError') px.deadUntil = Date.now() + 120000;
     }
   }
   throw new Error('proxy');
@@ -145,7 +148,7 @@ const ODD_ALL = /remix|cover|live|ao vivo|acustico|instrumental|karaoke|sped up|
 const plain = (x) => (x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
 /** escolhe até 3 candidatas com o mesmo nome, da duração mais parecida pra menos */
-function pickCandidates(items, videoDuration, hay) {
+function pickCandidates(items, videoDuration, hay, limit = 3) {
   return items
     .filter((c) => sameSong(c.track, c.artist, hay))
     .map((c) => {
@@ -160,7 +163,7 @@ function pickCandidates(items, videoDuration, hay) {
       return { ...c, diff, score: diff + extra * 30 };
     })
     .sort((x, y) => x.score - y.score)
-    .slice(0, 3);
+    .slice(0, limit);
 }
 
 /* ---------- fonte 2: Deezer (ótimo pra música brasileira) ---------- */
@@ -171,6 +174,7 @@ async function deezerJwt() {
   let d;
   try { d = await fetchJSON(authUrl); }
   catch (e) { if (e.byDeadline) throw e; d = await proxied(authUrl); }
+  if (!d || typeof d.jwt !== 'string' || !d.jwt) throw new Error('deezer sem jwt');   // senão mandava "Bearer undefined"
   dzJwt = d.jwt; dzJwtAt = Date.now();
   return dzJwt;
 }
@@ -180,13 +184,28 @@ function deezerSearch(text) {
   const url = 'https://api.deezer.com/search?limit=10&q=' + encodeURIComponent(text);
   return cached('dz ' + url, () => deezerSearchNow(url));
 }
-function deezerSearchNow(url) {
+async function deezerSearchNow(url) {
   if (typeof document === 'undefined') return fetchJSON(url);          // (testes fora do navegador)
+  // 1º pelo intermediário (só dados, nada roda na página); se nenhum estiver de pé, JSONP direto
+  try { return await proxied(url); }
+  catch (e) { if (e.byDeadline) throw e; }
+  return deezerJsonp(url);
+}
+function deezerJsonp(url) {
+  if (outOfTime()) return Promise.reject(Object.assign(new Error('tempo esgotado'), { byDeadline: true }));
   return new Promise((resolve, reject) => {                             // JSONP: a busca do Deezer não libera fetch
     const cb = '__dz' + (++jsonpN);
     const sc = document.createElement('script');
-    const done = (fn, v) => { clearTimeout(t); delete window[cb]; sc.remove(); fn(v); };
-    const t = setTimeout(() => done(reject, new Error('timeout')), 9000);
+    const done = (fn, v) => {
+      clearTimeout(t);
+      // resposta atrasada depois do tempo: a função continua existindo (vazia), senão dava erro na página
+      window[cb] = () => {};
+      setTimeout(() => { delete window[cb]; }, 60000);
+      sc.remove();
+      fn(v);
+    };
+    const wait = Math.max(500, Math.min(9000, deadline - Date.now()));   // respeita o tempo máximo da busca
+    const t = setTimeout(() => done(reject, Object.assign(new Error('timeout'), { byDeadline: wait < 9000 })), wait);
     window[cb] = (d) => done(resolve, d);
     sc.onerror = () => done(reject, new Error('jsonp'));
     sc.src = url + '&output=jsonp&callback=' + cb;
@@ -212,7 +231,7 @@ async function deezerFind(text, videoDuration, hay) {
     const sl = d && d.data && d.data.track && d.data.track.lyrics && d.data.track.lyrics.synchronizedLines;
     if (!sl || !sl.length) continue;
     const lines = parseLRC(sl.map((l) => l.lrcTimestamp + l.line).join('\n'));
-    if (lines.length >= 4) return { lines, diff: c.diff, artist: c.artist, track: c.track };
+    if (lines.length >= 4) return { lines, diff: c.diff, score: c.score, artist: c.artist, track: c.track };
   }
   return null;
 }
@@ -228,7 +247,7 @@ async function neteaseFind(text, videoDuration, hay) {
     const lrc = ly && ly.lrc && ly.lrc.lyric;
     if (!lrc) continue;
     const lines = parseLRC(lrc);
-    if (lines.length >= 4) return { lines, diff: c.diff, artist: c.artist, track: c.track };
+    if (lines.length >= 4) return { lines, diff: c.diff, score: c.score, artist: c.artist, track: c.track };
   }
   return null;
 }
@@ -240,7 +259,11 @@ async function neteaseFind(text, videoDuration, hay) {
 export async function findLyrics(title, author, videoDuration) {
   const queries = buildQueries(title, author);
   const hay = normName(title + ' ' + cleanAuthor(author)) + ' ' + plain(title);
-  const st = { best: null, down: 0, tried: 0 };
+  // Só a busca mais nova mexe em memo/relaxed/deadline: se pularam a música no meio,
+  // a busca velha para no próximo passo (nem chega a perguntar pras outras fontes).
+  const my = ++searchGen;
+  const superseded = () => my !== searchGen;
+  const st = { best: null, down: 0, tried: 0, stop: superseded };
   deadline = Date.now() + 20000;   // no máximo ~20s procurando
   memo = new Map();
   let timedOut = false;
@@ -248,16 +271,20 @@ export async function findLyrics(title, author, videoDuration) {
   try {
     // 1ª passada: exige que o artista apareça no título/canal. 2ª: só o nome da música.
     for (const rel of [false, true]) {
+      if (superseded()) throw new Error('cancelado');
       relaxed = rel;
-      const r = await searchAll(queries, hay, title, videoDuration, st);
+      const r = await searchAll(queries, hay, videoDuration, st);
+      if (superseded()) throw new Error('cancelado');
       if (r) return r;
       if (st.best) return st.best;
       if (outOfTime()) { timedOut = true; break; }
     }
   } finally {
-    relaxed = false;
-    deadline = Infinity;
-    memo = new Map();
+    if (!superseded()) {
+      relaxed = false;
+      deadline = Infinity;
+      memo = new Map();
+    }
   }
 
   if (timedOut) throw new Error('Os sites de letras estão muito lentos agora 😢 Tenta de novo daqui a pouco.');
@@ -267,30 +294,40 @@ export async function findLyrics(title, author, videoDuration) {
 
 /** Procura em todas as fontes (cada fonte com todas as formas do título AO MESMO TEMPO).
  *  Devolve logo se achar uma bem parecida; senão guarda a melhor em st.best */
-async function searchAll(queries, hay, title, videoDuration, st) {
-  const consider = (r) => { if (r && (!st.best || r.diff < st.best.diff)) st.best = r; };
-  const good = () => !!(st.best && st.best.diff <= 4);
+async function searchAll(queries, hay, videoDuration, st) {
+  // nota = diferença de duração + 30 por "versão diferente" (remix, ao vivo, acústico…) que o vídeo não tem
+  const rank = (r) => (r.score != null ? r.score : r.diff);
+  const consider = (r) => { if (r && (!st.best || rank(r) < rank(st.best))) st.best = r; };
+  const good = () => !!(st.best && rank(st.best) <= 4);
 
-  // 1) LRCLIB
+  // 1) LRCLIB (passa pela mesma peneira das outras fontes: versão errada perde pra original)
   st.tried++;
   const lr = await Promise.allSettled(queries.map((q) => search(q)));
+  if (st.stop()) return null;
   if (lr.every((x) => x.status === 'rejected')) st.down++;
+  const items = [];
+  const seen = new Set();
   for (const x of lr) {
     if (x.status !== 'fulfilled') continue;
     for (const r of x.value || []) {
       if (!r.syncedLyrics || r.instrumental) continue;
-      if (!sameSong(r.trackName, r.artistName, hay)) continue;
-      const lines = parseLRC(r.syncedLyrics);
-      if (lines.length < 4) continue;
-      consider({ lines, diff: videoDuration ? Math.abs((r.duration || 0) - videoDuration) : 0, artist: r.artistName, track: r.trackName });
+      const key = r.id != null ? 'id' + r.id : `${r.trackName}|${r.artistName}|${r.duration}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      items.push({ track: r.trackName, artist: r.artistName, duration: r.duration || 0, lrc: r.syncedLyrics });
     }
+  }
+  for (const c of pickCandidates(items, videoDuration, hay, Infinity)) {
+    const lines = parseLRC(c.lrc);
+    if (lines.length < 4) continue;
+    consider({ lines, diff: c.diff, score: c.score, artist: c.artist, track: c.track });
   }
   if (good()) return st.best;
 
   // 2) e 3) Deezer e NetEase
   const texts = [...new Set(queries.map((q) => q.q || `${q.artist_name} ${q.track_name}`))].slice(0, 4);
   for (const find of [deezerFind, neteaseFind]) {
-    if (outOfTime()) return null;
+    if (outOfTime() || st.stop()) return null;
     // sem intermediário funcionando, nem tenta (Deezer precisa de um que aceite POST)
     if (!proxyAvailable(find === deezerFind)) continue;
     st.tried++;
@@ -302,14 +339,24 @@ async function searchAll(queries, hay, title, videoDuration, st) {
   return null;
 }
 
+// créditos no começo das letras da NetEase ("作词 : ...", "编曲：...", "混音 : ...");
+// não corta versos reais em japonês/chinês que só têm ":" (ex.: "午前0時: 君を待つ")
+const NETEASE_CREDIT = /^(?:(?:执行|執行|联合|聯合|音乐|音樂)?(?:作[词詞曲]|[词詞]\s*[/／]?\s*曲|[词詞]|曲|编曲|編曲|制作人?|製作人?|监制|監製|混音|母[带帶]|[录錄]音|缩混|縮混|配唱|和[声聲]|伴唱|主唱|演唱|原唱|翻唱|歌手|出品|发行|發行|企[划劃]|统[筹籌]|統籌|策[划劃]|版权|版權|吉他|贝斯|貝斯|钢琴|鋼琴|键盘|鍵盤|弦[乐樂]|鼓|人[声聲]|声乐|聲樂|总[监監]|總監)[师師棚室人方手工程]*)\s*[:：]/;
+
 /** "[01:23.45] texto" -> [{ t, end, text }] */
 export function parseLRC(lrc) {
   const stamps = [];
   for (const raw of lrc.split(/\r?\n/)) {
-    const tags = [...raw.matchAll(/\[(\d+):(\d+(?:[.:]\d+)?)\]/g)];
-    if (!tags.length) continue;
-    const text = raw.replace(/\[[^\]]*\]/g, '').trim();
-    if (/[\u3000-\u9fff]/.test(text) && /[:：]/.test(text)) continue;   // créditos em chinês da NetEase
+    // só os tempos do COMEÇO da linha marcam quando ela toca ("[00:10][01:20]Refrão" = repete);
+    // um tempo no meio da frase é marcação de palavra (não pode duplicar a linha)
+    const head = raw.match(/^\s*((?:\[\d+:\d+(?:[.:]\d+)?\]\s*)+)/);
+    if (!head) continue;
+    const tags = [...head[1].matchAll(/\[(\d+):(\d+(?:[.:]\d+)?)\]/g)];
+    const text = raw.slice(head[0].length)
+      .replace(/<\d+:\d+(?:[.:]\d+)?>/g, '')      // LRC "melhorado": <00:12.34> antes de cada palavra
+      .replace(/\[[^\]]*\]/g, '')                  // marcações no meio da frase
+      .replace(/\s+/g, ' ').trim();
+    if (NETEASE_CREDIT.test(text)) continue;       // créditos da NetEase (sem apagar verso com ":")
     for (const m of tags) stamps.push({ t: +m[1] * 60 + parseFloat(m[2].replace(':', '.')), text });
   }
   stamps.sort((a, b) => a.t - b.t);

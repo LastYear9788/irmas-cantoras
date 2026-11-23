@@ -6,6 +6,36 @@ const MIN_F = 65, MAX_F = 1100;
 let corr = new Float32Array(0);
 let flt = new Float32Array(0);
 
+/**
+ * De quantas em quantas amostras juntar antes de procurar a nota: voz vai até ~1100 Hz,
+ * então ~24 mil por segundo sobra. Em placa de 96/192 kHz junta de 4/8 (senão a janela
+ * ficava curta demais pra voz grave e o detector errava).
+ */
+export function decimationFor(rate) {
+  if (rate <= 24000) return 1;
+  let d = 2;
+  while (rate / d > 36000) d *= 2;
+  return d;
+}
+/** Tamanho do pedaço de áudio lido: ~43 ms (e ~1024 amostras pro detector) em qualquer taxa */
+export function fftSizeFor(rate) {
+  if (rate <= 12000) return 512;
+  if (rate <= 24000) return 1024;
+  return 1024 * decimationFor(rate);
+}
+/** Junta as amostras de d em d (média) em out e devolve a nota de out */
+export function detectPitchDecimated(b, rate, out) {
+  const d = decimationFor(rate);
+  if (d === 1) return detectPitch(b, rate);
+  const n = Math.min(out.length, Math.floor(b.length / d));
+  for (let i = 0; i < n; i++) {
+    let sum = 0;
+    for (let k = 0; k < d; k++) sum += b[i * d + k];
+    out[i] = sum / d;
+  }
+  return detectPitch(n === out.length ? out : out.subarray(0, n), rate / d);
+}
+
 /** remove deslocamento DC (média) + passa-baixa (2 polos, ~1,6 kHz): tira chiado e ronco DC do microfone */
 function lowpass(src, rate) {
   const n = src.length;

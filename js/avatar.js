@@ -70,12 +70,18 @@ export function setAvatarsEnabled(on) { try { localStorage.setItem('ic-avatars',
  * Retorna { vowel: 'a'|'e'|'i'|'o'|'u', idx } — idx muda a cada sílaba (pra balançar no ritmo).
  */
 export function vowelAt(text, progress) {
-  const t = String(text || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  const t = String(text || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   const re = /[aeiouy]+/g;
   const groups = [];
   let m;
   while ((m = re.exec(t))) groups.push(m);
-  if (!groups.length) return { vowel: 'a', idx: 0 };
+  if (!groups.length) {
+    // japonês/chinês/coreano: cada caractere é uma sílaba (a boca abre e fecha no ritmo)
+    const cjk = String(text || '').match(/[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/g);
+    if (!cjk) return { vowel: 'a', idx: 0 };
+    const idx = Math.max(0, Math.min(cjk.length - 1, Math.floor((Number(progress) || 0) * cjk.length)));
+    return { vowel: 'aoeai'[idx % 5], idx };
+  }
   const idx = Math.max(0, Math.min(groups.length - 1, Math.floor((Number(progress) || 0) * groups.length)));
   const g = groups[idx];
   let v = g[0][0];
@@ -94,7 +100,7 @@ export function loadThree(src) {
     threeP = new Promise((resolve, reject) => {
       const s = document.createElement('script');
       s.src = src;
-      s.onload = () => (window.THREE ? resolve(window.THREE) : reject(new Error('3D não carregou')));
+      s.onload = () => { if (window.THREE) resolve(window.THREE); else { threeP = null; reject(new Error('3D não carregou')); } };
       s.onerror = () => { threeP = null; reject(new Error('3D não carregou')); };
       document.head.appendChild(s);
     });
@@ -404,6 +410,7 @@ export class AvatarStage {
     this.camera.position.set(0, 2.1, 8.2); this.camera.lookAt(0, 1.6, 0);
     this.camera.updateProjectionMatrix();
     this.lastKey = '';
+    this.rectsCache = null;
     this.layout();
   }
 
@@ -444,8 +451,23 @@ export class AvatarStage {
     });
   }
 
+  /**
+   * rects() mede a página (getBoundingClientRect força o navegador a recalcular o layout):
+   * mede no máximo ~5x/s, e a altura vai deslizando — quando a letra quebra em 2 linhas
+   * as bonequinhas descem suavemente em vez de dar um pulo.
+   */
+  placed(now, dt) {
+    if (!this.rectsCache || this.rectsCache.length !== this.figs.length || now - this.rectsAt > 200 || now < this.rectsAt) {
+      this.rectsCache = this.rects(); this.rectsAt = now;
+    }
+    const ys = this.shownY && this.shownY.length === this.rectsCache.length ? this.shownY : null;
+    this.shownY = this.rectsCache.map((r, i) => (ys && Math.abs(ys[i] - r.y) < 400 ? ys[i] + (r.y - ys[i]) * Math.min(1, dt * 10) : r.y));
+    return this.rectsCache.map((r, i) => ({ ...r, y: Math.round(this.shownY[i]) }));
+  }
+
   /** list = [{ cfg, slot, color }] na ordem das jogadoras (índice = índice da jogadora) */
   setPlayers(list) {
+    this.rectsCache = null; this.shownY = null;
     this.figs.forEach((f) => this.drop(f));
     this.figs = list.map((p) => this.makeFig(p));
     this.layout();
@@ -478,7 +500,14 @@ export class AvatarStage {
   }
 
   /** o que cada uma está fazendo agora: { singing, vol 0..1, brow -1..1, vowel, onset } */
-  setInput(i, inp) { const f = this.figs[i]; if (f) Object.assign(f.in, inp); }
+  setInput(i, inp) {
+    const f = this.figs[i]; if (!f) return;
+    // "começou sílaba" fica guardado até o próximo quadro usar (no modo leve o quadro é mais lento
+    // que as leituras, e o "false" da leitura seguinte apagava o "true" antes de a boneca pular)
+    const keep = f.in.onset && inp.onset === false;
+    Object.assign(f.in, inp);
+    if (keep) f.in.onset = true;
+  }
 
   react(i, kind) {
     const f = this.figs[i]; if (!f || !['perfect', 'good', 'miss'].includes(kind)) return;
@@ -505,10 +534,12 @@ export class AvatarStage {
     const raw = (now - this.last) / 1000;
     const fps = this.mode === 'game' ? (this.lite ? 20 : 30) : (this.lite ? 30 : 60);
     if (raw < 1 / (fps + 2)) return;
+    // palco escondido (janela estreita: o CSS some com as bonequinhas): não gasta placa de vídeo à toa
+    if (this.mode === 'game' && !this.canvas.clientWidth) { this.last = now; this.shownY = null; return; }
     const t0 = performance.now();
     const dt = Math.min(0.05, raw); this.last = now;
     const t = now / 1000;
-    const R = this.mode === 'game' ? this.rects() : null;
+    const R = this.mode === 'game' ? this.placed(now, dt) : null;
     if (R) R.forEach((r, i) => { const f = this.figs[i]; f.side = r.side; f.sx = r.x + r.w / 2; f.rig.root.rotation.y = -r.side * 0.32; });
     // pra onde olha quem não está cantando: pra quem está
     const singerX = this.figs.filter((f) => f.in.singing).map((f) => (R ? f.sx : f.rig.root.position.x));
@@ -551,10 +582,11 @@ export class AvatarStage {
     }
     f.look += (lookT - f.look) * Math.min(1, dt * 4);
     if (!this.reduce) {
-      if (singer && inp.onset && v > 0.2) { f.bobV = -1; inp.onset = false; }
+      if (singer && inp.onset && v > 0.2) f.bobV = -1;
       if (!singer) f.bobV += (Math.sin(t * 2.4 + i * 2) * 0.6 - f.bob) * 0.05;
       f.bob += (f.bobV - f.bob) * Math.min(1, dt * 12); f.bobV *= Math.pow(0.02, dt);
     }
+    inp.onset = false;   // usado (ou perdeu a hora): não pula atrasado depois
     f.nextBlink -= dt; if (f.nextBlink <= 0) { f.blink = 1; f.nextBlink = 2 + Math.random() * 3; }
     f.blink = Math.max(0, f.blink - dt * 7);
     if (f.moodT > 0) { f.moodT -= dt; if (f.moodT <= 0) f.mood = 'idle'; }
@@ -598,7 +630,12 @@ export class AvatarStage {
   /** gira devagarinho (provador) */
   spin(t) { this.figs.forEach((f) => { f.rig.root.rotation.y = 0.25 + Math.sin(t / 1600) * 0.45; }); }
 
-  clear() { this.fx.forEach((p) => this.scene.remove(p.o)); this.fx = []; this.renderer.setScissorTest(false); this.renderer.clear(); this.lastKey = ''; }
+  clear() {
+    // as notinhas têm material próprio (as estrelas usam o do cache): libera da placa de vídeo
+    this.fx.forEach((p) => { this.scene.remove(p.o); if (p.type === 'note') p.o.material.dispose(); });
+    this.fx = [];
+    this.renderer.setScissorTest(false); this.renderer.clear(); this.lastKey = '';
+  }
 
   dispose() {
     this.clear();
