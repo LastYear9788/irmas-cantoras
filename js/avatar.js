@@ -106,18 +106,20 @@ export function loadThree(src) {
    Montagem 3D (só roda no navegador, depois do loadThree)
    ===================================================================== */
 let K = null;   // kit 3D (materiais/geometrias compartilhados)
+let LO = false; // modo leve: bolinhas com menos detalhe
+const q = (hi, lo) => (LO ? lo : hi);
 function kit() {
   if (K) return K;
   const T = window.THREE;
-  const grad = (() => { const d = new Uint8Array([165, 165, 165, 255, 215, 215, 215, 255, 245, 245, 245, 255]); const t = new T.DataTexture(d, 3, 1, T.RGBAFormat); t.minFilter = t.magFilter = T.NearestFilter; t.generateMipmaps = false; t.needsUpdate = true; return t; })();
+  const grad = (() => { const d = new Uint8Array([158, 158, 158, 255, 196, 196, 196, 255, 232, 232, 232, 255, 252, 252, 252, 255]); const t = new T.DataTexture(d, 4, 1, T.RGBAFormat); t.minFilter = t.magFilter = T.LinearFilter; t.generateMipmaps = false; t.needsUpdate = true; return t; })();
   const mats = new Map(), geos = new Map();
   const toon = (c, o = {}) => { const k = c + JSON.stringify(o); if (!mats.has(k)) mats.set(k, new T.MeshToonMaterial({ color: c, gradientMap: grad, ...o })); return mats.get(k); };
   const flat = (c, o = {}) => { const k = 'b' + c + JSON.stringify(o); if (!mats.has(k)) mats.set(k, new T.MeshBasicMaterial({ color: c, ...o })); return mats.get(k); };
-  const geo = (k, make) => { if (!geos.has(k)) geos.set(k, make()); return geos.get(k); };
-  const SPH = () => geo('s', () => new T.SphereGeometry(1, 20, 14));
-  const SML = () => geo('sm', () => new T.SphereGeometry(1, 10, 7));
-  const CYL = () => geo('c', () => new T.CylinderGeometry(1, 1, 1, 16));
-  const CONE = () => geo('cone', () => new T.ConeGeometry(0.16, 0.38, 10));
+  const geo = (k, make) => { k = (LO ? 'lo:' : '') + k; if (!geos.has(k)) geos.set(k, make()); return geos.get(k); };
+  const SPH = () => geo('s', () => new T.SphereGeometry(1, q(40, 18), q(28, 12)));
+  const SML = () => geo('sm', () => new T.SphereGeometry(1, q(18, 8), q(14, 6)));
+  const CYL = () => geo('c', () => new T.CylinderGeometry(1, 1, 1, q(20, 8)));
+  const CONE = () => geo('cone', () => new T.ConeGeometry(0.16, 0.38, q(16, 8)));
   const mesh = (g, m, x = 0, y = 0, z = 0, sx = 1, sy = sx, sz = sx) => { const o = new T.Mesh(g, m); o.position.set(x, y, z); o.scale.set(sx, sy, sz); return o; };
   const rx = (o, a) => { o.rotation.x = a; return o; };
   const shade = (hex, k) => { const c = new T.Color(hex); c.multiplyScalar(k); return '#' + c.getHexString(); };
@@ -138,9 +140,9 @@ function buildHair(cfg, head) {
   const hm = toon(cfg.hairColor);
   const g = new T.Group(); const swing = [];
   head.add(g);
-  const cap = mesh(geo('cap', () => new T.SphereGeometry(1.08, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.53)), hm);
+  const cap = mesh(geo('cap', () => new T.SphereGeometry(1.08, q(44, 20), q(24, 10), 0, Math.PI * 2, 0, Math.PI * 0.53)), hm);
   cap.rotation.x = -0.38; g.add(cap);
-  if (cfg.hair !== 'curtinho' && cfg.hair !== 'cachos') g.add(mesh(geo('back', () => new T.SphereGeometry(1.1, 24, 14, Math.PI * 0.88, Math.PI * 1.24, Math.PI * 0.3, Math.PI * 0.5)), hm));
+  if (cfg.hair !== 'curtinho' && cfg.hair !== 'cachos') g.add(mesh(geo('back', () => new T.SphereGeometry(1.1, q(44, 20), q(20, 8), Math.PI * 0.88, Math.PI * 1.24, Math.PI * 0.3, Math.PI * 0.5)), hm));
   if (cfg.bangs === 'franja') {
     for (let i = 0; i < 5; i++) {
       const x = -0.56 + i * 0.28, y = 0.48 - Math.abs(i - 2) * 0.03, z = Math.sqrt(Math.max(0, 1.12 - x * x - y * y));
@@ -160,7 +162,7 @@ function buildHair(cfg, head) {
   switch (cfg.hair) {
     case 'chanel': sideLocks(0.2); break;
     case 'longo':
-      g.add(mesh(geo('long', () => new T.CylinderGeometry(0.98, 1.12, 1.7, 22, 1, true, Math.PI * 0.55, Math.PI * 0.9)), toon(cfg.hairColor, { side: T.DoubleSide }), 0, -0.95, 0));
+      g.add(mesh(geo('long', () => new T.CylinderGeometry(0.98, 1.12, 1.7, q(36, 14), 1, true, Math.PI * 0.55, Math.PI * 0.9)), toon(cfg.hairColor, { side: T.DoubleSide }), 0, -0.95, 0));
       sideLocks(1.1); break;
     case 'rabo': sideLocks(0); tail(0, 0.5, -1.05, 0, 3, 0.36); break;
     case 'chiquinha': sideLocks(0); tail(-0.98, 0.35, -0.25, -1, 3, 0.3); tail(0.98, 0.35, -0.25, 1, 3, 0.3); break;
@@ -217,17 +219,17 @@ function buildAcc(cfg, head) {
 function buildOutfit(cfg, body) {
   const { T, toon, geo, SML, CYL, mesh, rx } = kit();
   const M = toon(cfg.main), D = toon(cfg.detail);
-  const cone = (rt, rb, h) => geo(`k${rt}_${rb}_${h}`, () => new T.CylinderGeometry(rt, rb, h, 20));
+  const cone = (rt, rb, h) => geo(`k${rt}_${rb}_${h}`, () => new T.CylinderGeometry(rt, rb, h, q(32, 12)));
   switch (cfg.outfit) {
     case 'vestido':
       body.add(mesh(cone(0.36, 0.72, 0.85), M, 0, 0.7, 0));
-      body.add(rx(mesh(geo('frill', () => new T.TorusGeometry(0.7, 0.06, 6, 28)), D, 0, 0.29, 0), Math.PI / 2));
+      body.add(rx(mesh(geo('frill', () => new T.TorusGeometry(0.7, 0.06, 8, 48)), D, 0, 0.29, 0), Math.PI / 2));
       body.add(rx(mesh(geo('collar', () => new T.TorusGeometry(0.28, 0.07, 6, 20)), D, 0, 1.1, 0), Math.PI / 2));
       break;
     case 'saia':
       body.add(mesh(cone(0.36, 0.44, 0.46), M, 0, 0.92, 0));
       body.add(mesh(cone(0.42, 0.74, 0.42), D, 0, 0.53, 0));
-      body.add(rx(mesh(geo('frill2', () => new T.TorusGeometry(0.72, 0.05, 6, 28)), M, 0, 0.33, 0), Math.PI / 2));
+      body.add(rx(mesh(geo('frill2', () => new T.TorusGeometry(0.72, 0.05, 8, 48)), M, 0, 0.33, 0), Math.PI / 2));
       break;
     case 'jardineira':
       body.add(mesh(cone(0.36, 0.46, 0.5), D, 0, 0.9, 0));
@@ -326,23 +328,32 @@ function mergeStatic(root, keep) {
     });
     for (const [mat, list] of byMat) {
       if (list.length < 2) continue;
-      const pos = [], nor = [];
-      list.forEach((m) => {
+      const parts = list.map((m) => {
         m.updateMatrix();
-        const g = (m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone());
+        const g = m.geometry.clone();
         g.applyMatrix4(m.matrix);
-        pos.push(g.attributes.position.array);
-        nor.push(g.attributes.normal.array);
-        g.dispose();
         parent.remove(m);
+        return g;
       });
-      const cat = (arrs) => { const n = arrs.reduce((a, x) => a + x.length, 0); const out = new Float32Array(n); let o = 0; arrs.forEach((x) => { out.set(x, o); o += x.length; }); return out; };
+      const nv = parts.reduce((n, g) => n + g.attributes.position.count, 0);
+      const ni = parts.reduce((n, g) => n + (g.index ? g.index.count : g.attributes.position.count), 0);
+      const pos = new Float32Array(nv * 3), nor = new Float32Array(nv * 3), idx = nv > 65535 ? new Uint32Array(ni) : new Uint16Array(ni);
+      let vo = 0, io = 0;
+      parts.forEach((g) => {
+        pos.set(g.attributes.position.array, vo * 3);
+        nor.set(g.attributes.normal.array, vo * 3);
+        const cnt = g.attributes.position.count;
+        if (g.index) { const src = g.index.array; for (let k = 0; k < src.length; k++) idx[io + k] = src[k] + vo; io += src.length; }
+        else { for (let k = 0; k < cnt; k++) idx[io + k] = vo + k; io += cnt; }
+        vo += cnt;
+        g.dispose();
+      });
       const geo = new T.BufferGeometry();
-      geo.setAttribute('position', new T.BufferAttribute(cat(pos), 3));
-      geo.setAttribute('normal', new T.BufferAttribute(cat(nor), 3));
+      geo.setAttribute('position', new T.BufferAttribute(pos, 3));
+      geo.setAttribute('normal', new T.BufferAttribute(nor, 3));
+      geo.setIndex(new T.BufferAttribute(idx, 1));
       geo.computeBoundingSphere();
-      const merged = new T.Mesh(geo, mat);
-      parent.add(merged);
+      parent.add(new T.Mesh(geo, mat));
       owned.push(geo);
     }
   });
@@ -353,7 +364,8 @@ const VOWEL = { a: [1.0, 1.0], e: [1.25, 0.55], i: [1.35, 0.36], o: [0.7, 0.9], 
 
 /**
  * Um palco 3D num <canvas>.
- * mode 'game': várias bonequinhas nos cantos de baixo da tela do jogo.
+ * mode 'game': várias bonequinhas na tela do jogo, cada uma no seu quadradinho (ao lado do cartão da
+ *   letra ou nos cantos de baixo) e com a própria câmera de frente: sem a deformação de uma câmera larga.
  * mode 'preview': uma só, no provador.
  */
 export class AvatarStage {
@@ -361,6 +373,10 @@ export class AvatarStage {
     const { T } = kit();
     this.T = T; this.canvas = canvas; this.mode = mode; this.lite = lite;
     this.renderer = new T.WebGLRenderer({ canvas, antialias: !lite, alpha: true, powerPreference: 'low-power' });
+    this.renderer.setClearColor(0x000000, 0);
+    if (mode === 'game') this.renderer.autoClear = false;
+    this.anchor = null;      // (jogo) função que diz onde está o cartão da letra
+    this.lastKey = '';
     this.scene = new T.Scene();
     this.camera = new T.PerspectiveCamera(30, 2, 0.1, 100);
     this.scene.add(new T.HemisphereLight(0xffffff, 0xffd6ea, 0.62));
@@ -372,30 +388,59 @@ export class AvatarStage {
     this.resize();
   }
 
-  setLite(on) { if (this.lite !== on) { this.lite = on; this.resize(); } }
+  setLite(on) {
+    if (this.lite === on) return;
+    this.lite = on; this.resize();
+    // no jogo, modo leve também troca as bonequinhas por versões com menos detalhe
+    if (this.mode === 'game' && this.figs.length) { LO = on; this.figs.forEach((f, i) => { f.key = ''; this.setLook(i, f.cfg); }); LO = false; }
+  }
 
   resize() {
     const w = this.canvas.clientWidth, h = this.canvas.clientHeight;
     if (!w || !h) return;
-    this.renderer.setPixelRatio(this.lite || this.mode === 'game' ? 1 : Math.min(1.75, window.devicePixelRatio || 1));
+    this.renderer.setPixelRatio(this.lite ? 1 : Math.min(1.75, window.devicePixelRatio || 1));
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
-    if (this.mode === 'preview') { this.camera.position.set(0, 2.1, 8.2); this.camera.lookAt(0, 1.6, 0); }
-    else { this.camera.position.set(0, 2.15, 8.2); this.camera.lookAt(0, 1.75, 0); }
+    this.camera.position.set(0, 2.1, 8.2); this.camera.lookAt(0, 1.6, 0);
     this.camera.updateProjectionMatrix();
+    this.lastKey = '';
     this.layout();
   }
 
-  /** onde cada uma fica: eu no canto esquerdo, as outras do lado direito e depois pra dentro */
+  /** (jogo) fn() -> retângulo do cartão da letra na tela (ou null) */
+  setAnchor(fn) { this.anchor = fn; }
+
+  /** no mundo 3D cada uma fica longe da outra: cada câmera só enxerga a sua */
   layout() {
     if (this.mode === 'preview') { this.figs.forEach((f) => { f.rig.root.position.x = 0; f.rig.root.rotation.y = 0.25; }); return; }
-    const halfW = Math.tan((this.camera.fov / 2) * Math.PI / 180) * this.camera.position.z * this.camera.aspect;
-    const edge = Math.max(1.4, halfW - 1.95);
-    this.figs.forEach((f) => {
-      const s = f.slot, side = s % 2 === 0 ? -1 : 1, inward = Math.floor(s / 2) * 2.5;
-      f.home = side * Math.max(0.8, edge - inward);
-      f.rig.root.position.x = f.home;
-      f.rig.root.rotation.y = -side * 0.35;
+    this.figs.forEach((f) => { f.rig.root.position.x = f.slot * 14; });
+  }
+
+  /**
+   * Quadradinho de cada uma na tela (px): eu à esquerda do cartão da letra, a 2ª à direita,
+   * a 3ª e a 4ª um pouco atrás e menores. Sem espaço do lado da letra: cantos de baixo.
+   */
+  rects() {
+    const W = this.canvas.clientWidth, Hs = this.canvas.clientHeight;
+    let h = Math.max(200, Math.min(420, Hs * 0.36)), w = h * 0.72;
+    const a = this.anchor ? this.anchor() : null;
+    const card = a && a.card, right = Math.min(W, (a && a.right) || W);   // right: até onde dá (painel de emojis)
+    let lx, rx, bottom;
+    // cabe do lado da letra? (encolhe um pouco se precisar, mas não muito)
+    const fit = card && card.width > 0 ? Math.min(w, card.left - 12, right - card.right - 12) : 0;
+    if (fit >= 115) {
+      w = fit; h = w / 0.72;
+      lx = card.left - w - 6; rx = card.right + 6; bottom = Math.min(Hs - 70, card.bottom + h * 0.1);
+    } else {
+      lx = 12; rx = right - w - 8; bottom = Hs - 66;
+    }
+    return this.figs.map((f) => {
+      const side = f.slot % 2 === 0 ? -1 : 1, back = f.slot >= 2;
+      const k = back ? 0.8 : 1, ww = w * k, hh = h * k;
+      let x = side < 0 ? lx : rx;
+      if (back) x += side < 0 ? -ww * 0.62 : w - ww + ww * 0.62;
+      x = Math.max(0, Math.min(right - ww, x));
+      return { x: Math.round(x), y: Math.round(Math.max(4, bottom - hh)), w: Math.round(ww), h: Math.round(hh), side };
     });
   }
 
@@ -408,7 +453,9 @@ export class AvatarStage {
 
   makeFig(p) {
     const cfg = sanitizeAvatar(p.cfg);
+    LO = this.lite && this.mode === 'game';
     const rig = buildGirl(cfg, p.color ? hexA(p.color, 0.55) : null);
+    LO = false;
     this.scene.add(rig.root);
     return { cfg, slot: p.slot || 0, color: p.color, rig, key: JSON.stringify(cfg), mouth: 0, mw: 1, mh: 1, brow: 0, tilt: 0, look: 0, bob: 0, bobV: 0, jump: 0, blink: 0, nextBlink: 1 + Math.random() * 3, mood: 'idle', moodT: 0, mic: 0, in: { singing: false, vol: 0, brow: 0, vowel: 'a', onset: false } };
   }
@@ -444,7 +491,7 @@ export class AvatarStage {
     if (this.fx.length > (this.lite ? 6 : 24)) return;
     const h = new T.Vector3(); f.rig.head.getWorldPosition(h);
     let o;
-    const side = f.rig.root.position.x <= 0 ? 1 : -1;
+    const side = this.mode === 'game' ? -(f.side || -1) : 1;   // notinhas voam pro lado de dentro da tela
     if (type === 'note') { o = new T.Sprite(new T.SpriteMaterial({ map: noteTex, transparent: true, depthWrite: false })); o.scale.setScalar(0.45); o.position.set(h.x + side * 0.9, h.y + 0.2, h.z + 0.3); }
     else o = mesh(STAR(), flat('#ffc93c'), h.x, h.y + 1.1, h.z, 0.13);
     this.scene.add(o);
@@ -461,11 +508,28 @@ export class AvatarStage {
     const t0 = performance.now();
     const dt = Math.min(0.05, raw); this.last = now;
     const t = now / 1000;
+    const R = this.mode === 'game' ? this.rects() : null;
+    if (R) R.forEach((r, i) => { const f = this.figs[i]; f.side = r.side; f.sx = r.x + r.w / 2; f.rig.root.rotation.y = -r.side * 0.32; });
     // pra onde olha quem não está cantando: pra quem está
-    const singerX = this.figs.filter((f) => f.in.singing).map((f) => f.rig.root.position.x);
+    const singerX = this.figs.filter((f) => f.in.singing).map((f) => (R ? f.sx : f.rig.root.position.x));
     this.figs.forEach((f, i) => this.animate(f, i, t, dt, singerX));
     this.stepFx(dt);
-    this.renderer.render(this.scene, this.camera);
+    if (!R) this.renderer.render(this.scene, this.camera);
+    else {
+      const rr = this.renderer, cam = this.camera, ch = this.canvas.clientHeight;
+      const key = R.map((r) => `${r.x},${r.y},${r.w},${r.h}`).join('|');
+      if (key !== this.lastKey) { this.lastKey = key; rr.setScissorTest(false); rr.clear(); }   // mudou de lugar: apaga tudo uma vez
+      rr.setScissorTest(true);
+      R.forEach((r, i) => {
+        const vy = ch - r.y - r.h;
+        rr.setViewport(r.x, vy, r.w, r.h); rr.setScissor(r.x, vy, r.w, r.h);
+        rr.clear();
+        const fx = this.figs[i].rig.root.position.x;
+        cam.aspect = r.w / r.h; cam.position.set(fx, 2.05, 7.9); cam.lookAt(fx, 1.82, 0); cam.updateProjectionMatrix();
+        rr.render(this.scene, cam);
+      });
+      rr.setScissorTest(false);
+    }
     this.cost = (this.cost || 0) * 0.9 + (performance.now() - t0) * 0.1;   // ms por quadro (média)
   }
 
@@ -480,7 +544,11 @@ export class AvatarStage {
     f.brow += (pn - f.brow) * Math.min(1, dt * 6);
     f.tilt += ((singer ? pn * 0.7 : Math.sin(t * 1.4 + i) * 0.4) - f.tilt) * Math.min(1, dt * 4);
     let lookT = 0;
-    if (!singer && singerX.length) { const dx = singerX.reduce((a, b) => a + b, 0) / singerX.length - R.root.position.x; lookT = Math.max(-0.6, Math.min(0.6, dx * 0.15)) - R.root.rotation.y; }
+    if (!singer && singerX.length) {
+      const mx = this.mode === 'game' ? f.sx : R.root.position.x, k = this.mode === 'game' ? 0.003 : 0.15;
+      const dx = singerX.reduce((a, b) => a + b, 0) / singerX.length - mx;
+      lookT = Math.max(-0.6, Math.min(0.6, dx * k)) - R.root.rotation.y;
+    }
     f.look += (lookT - f.look) * Math.min(1, dt * 4);
     if (!this.reduce) {
       if (singer && inp.onset && v > 0.2) { f.bobV = -1; inp.onset = false; }
@@ -530,7 +598,7 @@ export class AvatarStage {
   /** gira devagarinho (provador) */
   spin(t) { this.figs.forEach((f) => { f.rig.root.rotation.y = 0.25 + Math.sin(t / 1600) * 0.45; }); }
 
-  clear() { this.fx.forEach((p) => this.scene.remove(p.o)); this.fx = []; this.renderer.clear(); }
+  clear() { this.fx.forEach((p) => this.scene.remove(p.o)); this.fx = []; this.renderer.setScissorTest(false); this.renderer.clear(); this.lastKey = ''; }
 
   dispose() {
     this.clear();

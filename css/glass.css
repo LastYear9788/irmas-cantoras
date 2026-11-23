@@ -470,7 +470,7 @@ body.playing .top-controls { display: none; }
 /* ---------- bonequinha ---------- */
 .av-box { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 /* fica atrás do conteúdo do jogo (z-index -1 dentro do main), nos cantos de baixo */
-.av-layer { position: fixed; left: 0; bottom: 0; width: 100%; height: clamp(200px, 38vh, 400px); z-index: -1; pointer-events: none; }
+.av-layer { position: fixed; inset: 0; width: 100%; height: 100%; z-index: -1; pointer-events: none; }
 @media (max-width: 760px) { .av-layer { display: none; } }
 .av-card { width: min(860px, 100%); max-width: 860px; max-height: calc(100vh - 32px); overflow: auto; padding: 22px; display: flex; flex-direction: column; gap: 14px; }
 .av-layout { display: grid; grid-template-columns: minmax(200px, 300px) 1fr; gap: 16px; }

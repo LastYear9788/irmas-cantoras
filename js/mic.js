@@ -1,5 +1,5 @@
 // Microfone: volume e altura (pitch) da voz, direto no navegador.
-import { detectPitch, VoiceGate, SignalWatch } from './pitch.js?v=21';
+import { detectPitch, VoiceGate, SignalWatch } from './pitch.js?v=22';
 
 const CFG_KEY = 'ic-mic-cfg';
 

@@ -1,14 +1,14 @@
 // Irmãs Cantoras — fluxo do app (telas, lobby, jogo, resultado)
-import { net } from './net.js?v=21';
-import * as yt from './youtube.js?v=21';
-import { findLyrics } from './lyrics.js?v=21';
-import { assignParts, ALL } from './parts.js?v=21';
-import { mic } from './mic.js?v=21';
-import { Scorer } from './score.js?v=21';
-import { cam } from './cam.js?v=21';
-import { initCalibration, isCalibrationOpen, closeCalibration, renderBadges } from './calibrate.js?v=21';
-import { createLog, saveLog, lastLog, downloadLog } from './singlog.js?v=21';
-import { AV_OPTIONS, sanitizeAvatar, randomAvatar, loadMyAvatar, saveMyAvatar, avatarsEnabled, setAvatarsEnabled, vowelAt, loadThree, AvatarStage } from './avatar.js?v=21';
+import { net } from './net.js?v=22';
+import * as yt from './youtube.js?v=22';
+import { findLyrics } from './lyrics.js?v=22';
+import { assignParts, ALL } from './parts.js?v=22';
+import { mic } from './mic.js?v=22';
+import { Scorer } from './score.js?v=22';
+import { cam } from './cam.js?v=22';
+import { initCalibration, isCalibrationOpen, closeCalibration, renderBadges } from './calibrate.js?v=22';
+import { createLog, saveLog, lastLog, downloadLog } from './singlog.js?v=22';
+import { AV_OPTIONS, sanitizeAvatar, randomAvatar, loadMyAvatar, saveMyAvatar, avatarsEnabled, setAvatarsEnabled, vowelAt, loadThree, AvatarStage } from './avatar.js?v=22';
 
 const COLORS = ['#ff5fa2', '#4fb3ff', '#ffd166', '#7cf29a'];
 const ALL_COLOR = '#b388ff';
@@ -873,7 +873,7 @@ async function setupAvatars(g) {
   const canvas = $('av-layer');
   canvas.classList.remove('hidden');
   try {
-    if (!avStage) avStage = new AvatarStage(canvas, { mode: 'game', lite: isLite() });
+    if (!avStage) { avStage = new AvatarStage(canvas, { mode: 'game', lite: isLite() }); avStage.setAnchor(() => ({ card: document.querySelector('.lyrics-card').getBoundingClientRect(), right: document.querySelector('.react-pill').getBoundingClientRect().left - 6 })); }
     avStage.setLite(isLite());
     avStage.resize();
   } catch (e) { canvas.classList.add('hidden'); avStage = null; return; }   // PC sem 3D (WebGL): segue sem bonequinha
