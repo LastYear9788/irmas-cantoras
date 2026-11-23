@@ -47,6 +47,7 @@ Site estático, sem build: HTML + CSS + JavaScript puro.
 - `js/parts.js`: quem canta cada linha.
 - `js/mic.js` / `js/pitch.js` / `js/score.js`: microfone, detector de afinação e nota.
 - `tests/run.mjs`: testes automáticos da nota e do detector (`node tests/run.mjs`).
+- `js/avatar.js` + `js/three.min.js` (three.js r128, MIT): bonequinha 3D de cada jogadora, montada com formas simples e sombreado de desenho. Provador no lobby ("🎀 Montar minha bonequinha"); canta junto seguindo volume, nota e vogal da letra. Fica mais simples no modo leve e desliga sozinha na música se o PC engasgar.
 - `js/singlog.js`: relatório técnico da cantoria (botão "📋 Baixar relatório" no resultado e na calibração).
   Pra ler um relatório: `node tools/analisar-relatorio.mjs arquivo.json`.
 - `js/app.js`: telas e fluxo.

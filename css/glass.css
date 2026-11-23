@@ -466,6 +466,30 @@ body.playing .top-controls { display: none; }
 .cal-tag.bad { color: #ffb4c8; }
 
 .cal-overlay { z-index: 25; padding: 16px; }
+
+/* ---------- bonequinha ---------- */
+.av-box { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+/* fica atrás do conteúdo do jogo (z-index -1 dentro do main), nos cantos de baixo */
+.av-layer { position: fixed; left: 0; bottom: 0; width: 100%; height: clamp(200px, 38vh, 400px); z-index: -1; pointer-events: none; }
+@media (max-width: 760px) { .av-layer { display: none; } }
+.av-card { width: min(860px, 100%); max-width: 860px; max-height: calc(100vh - 32px); overflow: auto; padding: 22px; display: flex; flex-direction: column; gap: 14px; }
+.av-layout { display: grid; grid-template-columns: minmax(200px, 300px) 1fr; gap: 16px; }
+@media (max-width: 640px) { .av-layout { grid-template-columns: 1fr; } }
+.av-preview-wrap { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.av-preview { width: 100%; aspect-ratio: 3 / 4; border-radius: 18px; display: block;
+  background: radial-gradient(70% 60% at 50% 100%, rgba(255,150,200,.35), transparent 70%), linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,.03)); }
+.av-closet { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.av-tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+.av-tab { font: inherit; font-weight: 700; font-size: 14px; color: var(--text); background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.14); border-radius: 999px; padding: 8px 13px; cursor: pointer; }
+.av-tab[aria-selected="true"] { background: rgba(255,255,255,0.24); border-color: rgba(255,255,255,0.4); }
+.av-panel { display: flex; flex-direction: column; gap: 12px; }
+.av-opt { display: flex; flex-direction: column; gap: 6px; }
+.av-opt > span { font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; opacity: .75; }
+.av-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.av-chip { font: inherit; font-size: 13px; font-weight: 600; color: var(--text); background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.16); border-radius: 999px; padding: 7px 12px; cursor: pointer; }
+.av-chip[aria-pressed="true"] { background: #ff7eb6; border-color: #ff7eb6; color: #fff; }
+.av-sw { width: 30px; height: 30px; border-radius: 50%; border: 3px solid rgba(255,255,255,0.85); box-shadow: 0 0 0 1px rgba(0,0,0,.25); cursor: pointer; padding: 0; }
+.av-sw[aria-pressed="true"] { box-shadow: 0 0 0 3px #ff7eb6; }
 .phones-card { max-width: 440px; width: 100%; padding: 22px; text-align: center; display: flex; flex-direction: column; gap: 12px; }
 .phones-choices { display: flex; flex-direction: column; gap: 8px; }
 .phones-card .small { font-size: 12px; }

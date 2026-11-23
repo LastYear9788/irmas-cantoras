@@ -5,6 +5,7 @@ import { assignParts, ALL } from '../js/parts.js';
 import { parseLRC, buildQueries } from '../js/lyrics.js';
 import { cleanName } from '../js/net.js';
 import { createLog, analyze } from '../js/singlog.js';
+import { sanitizeAvatar, randomAvatar, vowelAt, AV_DEFAULT } from '../js/avatar.js';
 
 let passed = 0, failed = 0;
 function test(name, fn) {
@@ -318,6 +319,23 @@ console.log('\nMicrofone mudo x microfone com filtro');
     assert(w.problem(t) === null, 'não limpou');
   });
 }
+
+console.log('\nBonequinha');
+test('visual que chega pela rede só aceita opções conhecidas', () => {
+  const c = sanitizeAvatar({ hair: '<img onerror=x>', hairColor: 'red;}', outfit: 'moletom', main: '#ffffff', blush: 'sim', extra: 1 });
+  assert(c.hair === AV_DEFAULT.hair && c.hairColor === AV_DEFAULT.hairColor, JSON.stringify(c));
+  assert(c.outfit === 'moletom' && c.main === '#ffffff' && c.blush === true && !('extra' in c), JSON.stringify(c));
+  assert(JSON.stringify(sanitizeAvatar(null)) === JSON.stringify(AV_DEFAULT), 'vazio');
+  for (let i = 0; i < 30; i++) { const r = randomAvatar(); assert(JSON.stringify(sanitizeAvatar(r)) === JSON.stringify(r), 'sorteio inválido'); }
+});
+test('vogal da sílaba cantada segue a letra', () => {
+  const t = 'Nunca vou desistir de você';   // nu-nca-vou-de-sis-tir-de-vo-cê (9)
+  const at = (p) => vowelAt(t, p).vowel;
+  assert(at(0) === 'u' && at(0.15) === 'a' && at(0.25) === 'o' && at(0.99) === 'e', [0, 0.15, 0.25, 0.99].map(at).join(','));
+  assert(vowelAt('quero', 0).vowel === 'e', 'qu: o u não soa');
+  assert(vowelAt('', 0.5).vowel === 'a' && vowelAt('♪', 0.5).vowel === 'a', 'sem vogal');
+  assert(vowelAt(t, 0).idx === 0 && vowelAt(t, 0.99).idx === 8, 'índice da sílaba');
+});
 
 console.log('\nRelatório de diagnóstico');
 test('relatório registra, vira JSON e a análise acha o momento que parou de contar', () => {

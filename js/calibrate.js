@@ -2,7 +2,7 @@
 // Mede ruído ambiente + voz cantada, ajusta o VoiceGate pro microfone real da pessoa
 // e detecta problemas comuns: mudo, conflito com Discord/Windows, driver travado,
 // supressor de ruído externo (NVIDIA Broadcast/Krisp) e filtros do navegador cortando canto.
-import { mic } from './mic.js?v=20';
+import { mic } from './mic.js?v=21';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));

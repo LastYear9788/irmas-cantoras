@@ -1,13 +1,14 @@
 // Irmãs Cantoras — fluxo do app (telas, lobby, jogo, resultado)
-import { net } from './net.js?v=20';
-import * as yt from './youtube.js?v=20';
-import { findLyrics } from './lyrics.js?v=20';
-import { assignParts, ALL } from './parts.js?v=20';
-import { mic } from './mic.js?v=20';
-import { Scorer } from './score.js?v=20';
-import { cam } from './cam.js?v=20';
-import { initCalibration, isCalibrationOpen, closeCalibration, renderBadges } from './calibrate.js?v=20';
-import { createLog, saveLog, lastLog, downloadLog } from './singlog.js?v=20';
+import { net } from './net.js?v=21';
+import * as yt from './youtube.js?v=21';
+import { findLyrics } from './lyrics.js?v=21';
+import { assignParts, ALL } from './parts.js?v=21';
+import { mic } from './mic.js?v=21';
+import { Scorer } from './score.js?v=21';
+import { cam } from './cam.js?v=21';
+import { initCalibration, isCalibrationOpen, closeCalibration, renderBadges } from './calibrate.js?v=21';
+import { createLog, saveLog, lastLog, downloadLog } from './singlog.js?v=21';
+import { AV_OPTIONS, sanitizeAvatar, randomAvatar, loadMyAvatar, saveMyAvatar, avatarsEnabled, setAvatarsEnabled, vowelAt, loadThree, AvatarStage } from './avatar.js?v=21';
 
 const COLORS = ['#ff5fa2', '#4fb3ff', '#ffd166', '#7cf29a'];
 const ALL_COLOR = '#b388ff';
@@ -201,6 +202,9 @@ function renderLobby() {
 net.on('players', () => {
   renderLobby();
   if (state.game) renderScoreboard();
+  // entrou alguém novo: todo mundo manda o visual da bonequinha de novo (pra ela ver as outras)
+  const ids = net.players.map((p) => p.id).join(',');
+  if (ids !== lastAvatarIds) { lastAvatarIds = ids; clearTimeout(avShareTimer); avShareTimer = setTimeout(shareAvatar, 500); }
 });
 net.on('guestjoined', () => {
   broadcastSetup();
@@ -634,6 +638,7 @@ net.on('start', async (msg) => {
     myPhotos: [], peakPhoto: null, peak: 0, lastPeakShot: 0,
   };
   if (myIndex >= 0) state.game.log = newLog(state.game);
+  setupAvatars(state.game);
   renderShiftVal(savedShift);
   state.photos = Object.create(null);
   renderPhotos();
@@ -782,6 +787,7 @@ function gameLoop(round) {
   const g = state.game;
   if (!g || g.round !== round || g.finished) return;
   requestAnimationFrame((now) => { watchFps(now); g.frames = (g.frames || 0) + 1; gameLoop(round); });
+  if (g.av && !document.hidden) { try { g.av.stage.frame(performance.now()); } catch (e) { stopAvatars(g); } }
   if (!g.started) return;
 
   const { lt, k, active } = lyricPos(g);
@@ -817,6 +823,7 @@ function scoreLoop(round) {
       const ms = mic.status();
       g.log.tick({ ...m, lt, active, dt, mine: active >= 0 && isMine(g.who[active]), yt: yt.state(), problem: ms.problem });
     }
+    if (g.av) avatarTick(g, active, lt, m, now);
     if (active !== g.prevActive) {
       if (g.prevActive >= 0 && g.myIndex >= 0) rateLine(g, g.prevActive);
       g.prevActive = active;
@@ -829,14 +836,200 @@ function scoreLoop(round) {
       state.live[net.myId] = score;
       updateScores(active);
       if (g.myIndex >= 0) net.broadcast({ type: 'live', round: g.round, score });
+      g.fps = g.frames || 0; g.frames = 0;
+      avatarGuard(g);
       if (g.log) {
         g.log.event('score', score);
-        g.log.event('fps', g.frames || 0); g.frames = 0;
+        g.log.event('fps', g.fps || 0);
         // guarda de tempos em tempos: se a aba fechar ou o PC travar, o relatório não se perde
         if (now - (g.logSaved || 0) > 30000) { g.logSaved = now; saveLog(g.log); }
       }
     }
   }, 40);
+}
+
+/* ---------- bonequinhas 3D ---------- */
+const THREE_SRC = 'js/three.min.js?v=r128';
+let myAvatar = loadMyAvatar();
+saveMyAvatar(myAvatar);
+state.avatars = Object.create(null);
+let lastAvatarIds = '', avShareTimer = 0, avStage = null;
+const isLite = () => document.documentElement.classList.contains('lite');
+
+function shareAvatar() { if (net.myId) net.broadcast({ type: 'avatar', cfg: myAvatar }); }
+net.on('avatar', (msg) => {
+  if (!msg || !msg.from) return;
+  const cfg = sanitizeAvatar(msg.cfg);
+  state.avatars[msg.from] = cfg;
+  const g = state.game;
+  if (g && g.av) { const i = g.players.findIndex((p) => p.id === msg.from); const f = g.av.figOf.get(i); if (f !== undefined) g.av.stage.setLook(f, cfg); }
+});
+
+/** começo da música: monta o palco com as bonequinhas de quem está cantando */
+async function setupAvatars(g) {
+  if (!avatarsEnabled() || innerWidth <= 760) return;
+  try { await loadThree(THREE_SRC); } catch (e) { return; }
+  if (state.game !== g || g.finished) return;
+  const canvas = $('av-layer');
+  canvas.classList.remove('hidden');
+  try {
+    if (!avStage) avStage = new AvatarStage(canvas, { mode: 'game', lite: isLite() });
+    avStage.setLite(isLite());
+    avStage.resize();
+  } catch (e) { canvas.classList.add('hidden'); avStage = null; return; }   // PC sem 3D (WebGL): segue sem bonequinha
+  // eu no canto esquerdo; as outras do lado direito e depois pra dentro (até 4 no palco)
+  const order = g.players.map((p, i) => i).sort((a, b) => (a === g.myIndex ? -1 : b === g.myIndex ? 1 : a - b)).slice(0, 4);
+  const figOf = new Map();
+  const list = order.map((pi, slot) => {
+    figOf.set(pi, slot);
+    const p = g.players[pi];
+    if (!state.avatars[p.id]) state.avatars[p.id] = p.id === net.myId ? myAvatar : randomAvatar();
+    return { cfg: state.avatars[p.id], slot, color: colorOf(pi) };
+  });
+  avStage.setPlayers(list);
+  g.av = { stage: avStage, figOf, remote: Object.create(null), syl: -1, line: -1, pm: 0, sentAt: 0, sentL: -1, sentB: 99 };
+}
+/**
+ * PC engasgando com as bonequinhas? 1º passa pro modo leve delas; se continuar,
+ * desliga nesta música (a nota e o vídeo valem mais que o enfeite).
+ */
+function avatarGuard(g) {
+  if (!g.av || document.hidden || !g.started) return;
+  const slow = g.fps < 24 || (g.av.stage.cost || 0) > 12 || (g.sawPlaying && g.diag.notPlaying > 1.5);
+  g.av.slow = slow ? (g.av.slow || 0) + 1 : Math.max(0, (g.av.slow || 0) - 1);
+  if (g.av.slow >= 3 && !g.av.stage.lite) { g.av.stage.setLite(true); g.av.slow = 0; g.av.wasLite = true; logEv('bonequinha', 'leve'); }
+  else if (g.av.slow >= 4 && g.av.stage.lite) {
+    logEv('bonequinha', 'desligada');
+    stopAvatars(g);
+    toast('🎀 As bonequinhas foram desligadas nesta música pra não travar o seu PC.', 5000);
+  }
+}
+function stopAvatars(g) {
+  if (g) g.av = null;
+  $('av-layer').classList.add('hidden');
+  if (avStage) avStage.clear();
+}
+addEventListener('resize', () => { if (avStage && state.game && state.game.av) avStage.resize(); });
+new MutationObserver(() => { if (avStage && isLite()) avStage.setLite(true); }).observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+
+/** 25x por segundo: o que cada bonequinha faz (minha voz daqui; das outras, pela rede) */
+function avatarTick(g, active, lt, m, now) {
+  const av = g.av;
+  let vowel = 'a', onset = false;
+  if (active >= 0) {
+    const L = g.lines[active];
+    const r = vowelAt(L.text, (lt - L.t) / Math.max(0.1, L.end - L.t));
+    vowel = r.vowel;
+    onset = r.idx !== av.syl || active !== av.line;
+    av.syl = r.idx; av.line = active;
+  }
+  let myVol = 0, myBrow = 0;
+  if (g.myIndex >= 0) {
+    myVol = m.voiced ? Math.min(1, 0.35 + m.rms * 8) : m.loud ? Math.min(0.4, m.rms * 6) : 0;
+    if (m.voiced && m.pitch > 0) {
+      av.pm = av.pm ? av.pm + (m.pitch - av.pm) * 0.02 : m.pitch;          // nota "média" da pessoa
+      myBrow = Math.max(-1, Math.min(1, (12 * Math.log2(m.pitch / av.pm)) / 6));
+    }
+    // manda pras outras (pouquinho: ~8x por segundo e só quando muda)
+    const l = Math.round(myVol * 10), b = Math.round(myBrow * 10);
+    if (now - av.sentAt > 120 && (l !== av.sentL || Math.abs(b - av.sentB) > 1 || now - av.sentAt > 600)) {
+      av.sentAt = now; av.sentL = l; av.sentB = b;
+      net.broadcast({ type: 'voz', round: g.round, l, b });
+    }
+  }
+  const w = active >= 0 ? g.who[active] : null;
+  for (const [pi, fi] of av.figOf) {
+    const singing = w !== null && (w === pi || w === ALL);
+    let vol = 0, brow = 0;
+    if (pi === g.myIndex) { vol = myVol; brow = myBrow; }
+    else { const r = av.remote[pi]; if (r && now - r.at < 700) { vol = r.l / 10; brow = r.b / 10; } }
+    av.stage.setInput(fi, { singing, vol, brow, vowel, onset });
+  }
+}
+function avatarReact(g, kind) {
+  if (!kind || g.myIndex < 0) return;
+  if (g.av) { const f = g.av.figOf.get(g.myIndex); if (f !== undefined) g.av.stage.react(f, kind); }
+  net.broadcast({ type: 'voz', round: g.round, l: 0, b: 0, k: kind });
+}
+net.on('voz', (msg) => {
+  const g = state.game;
+  if (!g || !g.av || msg.round !== g.round || msg.from === net.myId) return;
+  const pi = g.players.findIndex((p) => p.id === msg.from);
+  if (pi < 0) return;
+  const n = (x, lo, hi) => Math.max(lo, Math.min(hi, Math.round(Number(x) || 0)));
+  if (msg.k) { const f = g.av.figOf.get(pi); if (f !== undefined) g.av.stage.react(f, String(msg.k)); return; }
+  g.av.remote[pi] = { l: n(msg.l, 0, 10), b: n(msg.b, -10, 10), at: performance.now() };
+});
+
+/* provador (no lobby) */
+let avPrev = null, avPrevRaf = 0, avTab = 'cabelo';
+function avTagText() { $('av-tag').textContent = avatarsEnabled() ? '' : '(desligadas durante a música)'; }
+avTagText();
+$('btn-avatar').onclick = openAvatarModal;
+$('av-close').onclick = closeAvatarModal;
+$('av-done').onclick = closeAvatarModal;
+$('av-modal').addEventListener('click', (e) => { if (e.target === $('av-modal')) closeAvatarModal(); });
+$('av-on').onchange = () => { setAvatarsEnabled($('av-on').checked); avTagText(); };
+$('av-random').onclick = () => { setMyAvatar(randomAvatar()); renderAvPanel(); if (avPrev) avPrev.react(0, 'good'); };
+document.querySelectorAll('.av-tab').forEach((b) => { b.onclick = () => { avTab = b.dataset.tab; renderAvPanel(); }; });
+$('av-panel').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-k]'); if (!b) return;
+  const k = b.dataset.k; const v = k === 'blush' ? b.dataset.v === 'true' : b.dataset.v;
+  setMyAvatar({ ...myAvatar, [k]: v });
+  $('av-panel').querySelectorAll(`[data-k="${k}"]`).forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+});
+function setMyAvatar(cfg) {
+  myAvatar = sanitizeAvatar(cfg);
+  saveMyAvatar(myAvatar);
+  if (avPrev) avPrev.setLook(0, myAvatar);
+  clearTimeout(avShareTimer); avShareTimer = setTimeout(shareAvatar, 600);
+}
+function renderAvPanel() {
+  const O = AV_OPTIONS, me = myAvatar;
+  document.querySelectorAll('.av-tab').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === avTab)));
+  const chips = (k, list) => `<div class="av-chips">${list.map(([v, l]) => `<button class="av-chip" type="button" data-k="${k}" data-v="${v}" aria-pressed="${String(me[k]) === String(v)}">${l}</button>`).join('')}</div>`;
+  const sw = (k, list) => `<div class="av-chips">${list.map((c) => `<button class="av-sw" type="button" style="background:${c}" data-k="${k}" data-v="${c}" aria-pressed="${me[k] === c}" aria-label="cor ${c}"></button>`).join('')}</div>`;
+  const opt = (label, html) => `<div class="av-opt"><span>${label}</span>${html}</div>`;
+  const T = {
+    cabelo: () => opt('Penteado', chips('hair', O.hair)) + opt('Franja', chips('bangs', O.bangs)) + opt('Cor do cabelo', sw('hairColor', O.hairColor)),
+    roupa: () => opt('Roupa', chips('outfit', O.outfit)) + opt('Cor principal', sw('main', O.cloth)) + opt('Cor do detalhe', sw('detail', O.cloth)) + opt('Sapatinho', sw('shoes', O.cloth)),
+    rosto: () => opt('Pele', sw('skin', O.skin)) + opt('Olhos', sw('eye', O.eye)) + opt('Bochechinha', chips('blush', [['true', 'Rosadinha'], ['false', 'Sem']])),
+    enfeite: () => opt('Enfeite', chips('acc', O.acc)) + opt('Cor do enfeite (e dos elásticos)', sw('accColor', O.accColor)),
+  };
+  $('av-panel').innerHTML = T[avTab]();
+}
+async function openAvatarModal() {
+  $('av-modal').classList.remove('hidden');
+  $('av-on').checked = avatarsEnabled();
+  $('av-msg').textContent = 'Carregando…';
+  renderAvPanel();
+  try {
+    await loadThree(THREE_SRC);
+    if ($('av-modal').classList.contains('hidden')) return;
+    if (!avPrev) avPrev = new AvatarStage($('av-preview'), { mode: 'preview', lite: isLite() });
+    avPrev.setPlayers([{ cfg: myAvatar, slot: 0 }]);
+    $('av-msg').textContent = '';
+  } catch (e) {
+    $('av-msg').textContent = 'Não consegui abrir o 3D neste PC. Dá pra escolher o visual mesmo assim; as outras vão ver.';
+    return;
+  }
+  cancelAnimationFrame(avPrevRaf);
+  const loop = (now) => {
+    if (!avPrev || $('av-modal').classList.contains('hidden')) return;
+    avPrevRaf = requestAnimationFrame(loop);
+    // "lá-lá-lá" de mentirinha pra ver a boquinha mexendo
+    const k = Math.floor(now / 340), x = (now % 340) / 340;
+    avPrev.setInput(0, { singing: Math.floor(now / 4000) % 2 === 0, vol: x < 0.8 ? 0.3 + 0.6 * Math.sin(Math.PI * x / 0.8) : 0, brow: Math.sin(k * 0.9) * 0.5, vowel: 'aeoia'[k % 5], onset: x < 0.1 });
+    avPrev.spin(now);
+    avPrev.frame(now);
+  };
+  avPrevRaf = requestAnimationFrame(loop);
+}
+function closeAvatarModal() {
+  $('av-modal').classList.add('hidden');
+  cancelAnimationFrame(avPrevRaf);
+  // libera o 3D do provador (PC fraco não precisa ficar com 2 palcos abertos)
+  if (avPrev) { avPrev.dispose(); avPrev = null; }
 }
 
 /* ---------- relatório de diagnóstico (pra descobrir depois por que não contou) ---------- */
@@ -980,6 +1173,7 @@ function rateLine(g, i) {
       .map(([k, t]) => [r[k], t]).sort((a, b) => a[0] - b[0])[0];
     if (weak[0] < 0.7) tip = weak[1];
   }
+  avatarReact(g, cls === 'perfect' ? 'perfect' : cls === 'miss' ? 'miss' : cls === 'ok' ? '' : 'good');
   const el = $('line-rate');
   el.className = 'line-rate ' + cls;
   el.innerHTML = `<b>${label}</b> <span class="pts">+${r.points.toLocaleString('pt-BR')}</span>${tip ? `<small>${esc(tip)}</small>` : ''}`;
@@ -1334,6 +1528,7 @@ function finishRound() {
   const g = state.game;
   if (!g || g.finished) return;
   g.finished = true;
+  stopAvatars(g);
   yt.pause();
   mic.monitor(false);
   if (g.recOffset != null) mic.recStop().then((blob) => setRecording(blob, g));
@@ -1645,6 +1840,7 @@ $('btn-other').onclick = () => {
 };
 net.on('lobby', (msg) => {
   clearRecording();
+  if (state.game) stopAvatars(state.game);
   state.game = null;
   $('in-game-hint').classList.add('hidden');
   document.body.classList.remove('playing');

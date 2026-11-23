@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Irmãs Cantoras</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎤</text></svg>">
-  <link rel="stylesheet" href="css/glass.css?v=20">
+  <link rel="stylesheet" href="css/glass.css?v=21">
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <script>
     document.documentElement.classList.toggle('theme-new', localStorage.getItem('ic-theme') !== 'classic');
@@ -16,8 +16,8 @@
         document.documentElement.classList.add('lite');
     } catch (e) { /* ok */ }
   </script>
-  <script type="module" src="js/app.js?v=20"></script>
-  <script type="module" src="js/theme.js?v=20"></script>
+  <script type="module" src="js/app.js?v=21"></script>
+  <script type="module" src="js/theme.js?v=21"></script>
 </head>
 <body>
   <!-- Fundo animado (é o que dá vida ao vidro) -->
@@ -111,6 +111,12 @@
           </div>
           <p id="cam-msg" class="hint">O app tira umas fotos suas cantando e mostra no final. Nada fica salvo.</p>
 
+          <div class="label">Bonequinha <span class="label-soft">(canta junto com você)</span></div>
+          <div class="av-box">
+            <button id="btn-avatar" class="btn btn-small" type="button">🎀 Montar minha bonequinha</button>
+            <span id="av-tag" class="hint"></span>
+          </div>
+
           <button id="btn-ready" class="btn btn-primary">Estou pronta!</button>
         </div>
 
@@ -168,6 +174,7 @@
 
     <!-- ============ JOGO ============ -->
     <section id="screen-game" class="screen">
+      <canvas id="av-layer" class="av-layer hidden" aria-hidden="true"></canvas>
       <div id="scoreboard" class="scoreboard"></div>
 
       <div class="game-center">
@@ -245,6 +252,39 @@
   <div class="top-controls">
     <button id="btn-lite" class="btn btn-small" type="button">⚡ Modo leve</button>
     <button id="btn-theme" class="btn btn-small" type="button">🎨 Visual: Novo</button>
+  </div>
+
+  <!-- ============ PROVADOR DA BONEQUINHA ============ -->
+  <div id="av-modal" class="overlay cal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="av-title">
+    <div class="card glass av-card">
+      <div class="cal-head">
+        <h2 id="av-title" class="cal-title">🎀 Minha bonequinha</h2>
+        <button id="av-close" class="cal-x" type="button" aria-label="Fechar">✕</button>
+      </div>
+      <div class="av-layout">
+        <div class="av-preview-wrap">
+          <canvas id="av-preview" class="av-preview" aria-label="Sua bonequinha"></canvas>
+          <p id="av-msg" class="hint center"></p>
+        </div>
+        <div class="av-closet">
+          <div class="av-tabs" role="tablist" aria-label="Provador">
+            <button class="av-tab" role="tab" data-tab="cabelo" aria-selected="true">💇 Cabelo</button>
+            <button class="av-tab" role="tab" data-tab="roupa" aria-selected="false">👗 Roupa</button>
+            <button class="av-tab" role="tab" data-tab="rosto" aria-selected="false">😊 Rosto</button>
+            <button class="av-tab" role="tab" data-tab="enfeite" aria-selected="false">🎀 Enfeite</button>
+          </div>
+          <div id="av-panel" class="av-panel"></div>
+        </div>
+      </div>
+      <label class="cal-toggle">
+        <input id="av-on" type="checkbox">
+        <span><b>Mostrar as bonequinhas durante a música</b><small>Desligue se o PC estiver muito lento. No modo leve elas já ficam mais simples.</small></span>
+      </label>
+      <div class="row center wrap">
+        <button id="av-random" class="btn btn-small" type="button">🎲 Sortear</button>
+        <button id="av-done" class="btn btn-primary btn-small" type="button">Pronto!</button>
+      </div>
+    </div>
   </div>
 
   <!-- ============ PERGUNTA: ESTÁ DE FONE? (1ª vez que liga o microfone) ============ -->
