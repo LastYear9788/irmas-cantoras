@@ -15,7 +15,7 @@ Pronto. O app acha a letra sozinho, divide quem canta o quê e dá a nota no fin
 - Use **fone de ouvido** (senão o microfone escuta a música e bagunça a nota).
 - Quando o navegador perguntar, **permita o microfone**.
 - Se a letra estiver adiantada ou atrasada, use os botões **− / +** embaixo da tela.
-- Se não achar a letra, tenta outro link da mesma música (clipe oficial ou "áudio oficial" costumam funcionar melhor).
+- A letra é escolhida automaticamente. No lobby, a dona da sala pode abrir **Escolher versão da letra** para buscar alternativas, conferir as primeiras linhas ou importar um arquivo `.lrc`. A versão escolhida vale para toda a sala e fica salva neste navegador para aquele vídeo. Para voltar à busca do app, selecione **Automático** e confirme.
 
 ### Extras
 - **Câmera (opcional):** ligue no lobby e o app tira umas fotos de você cantando pra mostrar no final. Nada fica salvo; cada uma pode apagar as próprias fotos.

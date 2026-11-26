@@ -2,7 +2,7 @@
 import { Scorer, syllables } from '../js/score.js';
 import { detectPitch, VoiceGate, SignalWatch, fftSizeFor, decimationFor, detectPitchDecimated } from '../js/pitch.js';
 import { assignParts, ALL } from '../js/parts.js';
-import { parseLRC, buildQueries, normName, findLyrics } from '../js/lyrics.js';
+import { parseLRC, buildQueries, normName, findLyrics, findLyricVersions } from '../js/lyrics.js';
 import { extractVideoId } from '../js/youtube.js';
 import proxyWorker from '../proxy/worker.js';
 import { cleanName } from '../js/net.js';
@@ -607,6 +607,23 @@ await atest('busca pulada no meio não continua procurando nas outras fontes', a
   assert(ra === 'cancelado', 'a velha terminou com: ' + ra);
   const extra = asked.filter((u) => u.includes('Primeira') && !u.includes('lrclib.net'));
   assert(!extra.length, 'a velha ainda perguntou: ' + extra.join(', '));
+});
+
+await atest('escolha manual lista letras com tempos diferentes mesmo quando o automático já encontrou a versão exata', async () => {
+  const shifted = LRC.replace(/\[00:(\d+)\.00\]/g, (_, seconds) => '[00:' + (+seconds + 1) + '.00]');
+  globalThis.fetch = async (url) => {
+    if (!String(url).includes('lrclib.net')) return jsonRes({ data: [], result: { songs: [] } });
+    return jsonRes([
+      { id: 1, trackName: 'Minha Cancao', artistName: 'Minha Banda', duration: 200, syncedLyrics: LRC },
+      { id: 2, trackName: 'Minha Cancao (Ao Vivo)', artistName: 'Minha Banda', albumName: 'Ao Vivo', duration: 215, syncedLyrics: shifted },
+      { id: 3, trackName: 'Minha Cancao', artistName: 'Minha Banda', duration: 200, syncedLyrics: LRC },
+      { id: 4, trackName: 'Outra Cancao', artistName: 'Minha Banda', duration: 200, syncedLyrics: LRC },
+    ]);
+  };
+  const versions = await findLyricVersions('Minha Banda - Minha Cancao', 'Minha Banda', 200);
+  assert(versions.length === 2, 'esperava original e ao vivo sem duplicatas: ' + versions.length);
+  assert(versions[0].lines[0].t === 10 && versions[1].lines[0].t === 11, 'perdeu os tempos de cada versão');
+  assert(versions[1].source === 'LRCLIB' && versions[1].album === 'Ao Vivo', 'faltou identificação da versão');
 });
 
 console.log('\nQuem só assiste');

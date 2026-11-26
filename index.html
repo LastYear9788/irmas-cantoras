@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Irmãs Cantoras</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎤</text></svg>">
-  <link rel="stylesheet" href="css/glass.css?v=23">
+  <link rel="stylesheet" href="css/glass.css?v=24">
   <script src="js/peerjs.min.js?v=1.5.4"></script>
   <script>
     // (navegador com cookies/armazenamento bloqueado: localStorage dá erro, então tudo vai dentro de try)
@@ -19,7 +19,7 @@
         document.documentElement.classList.add('lite');
     } catch (e) { /* ok */ }
   </script>
-  <script type="module" src="js/app.js?v=23"></script>
+  <script type="module" src="js/app.js?v=24"></script>
   <script type="module" src="js/theme.js?v=23"></script>
 </head>
 <body>
@@ -143,6 +143,22 @@
             </div>
             <button id="btn-skip" class="link skip-btn hidden" title="Pular essa música">Pular</button>
           </div>
+
+          <details id="lyric-picker" class="lyric-picker hidden">
+            <summary>Escolher versão da letra</summary>
+            <div class="lyric-controls">
+              <label for="lyric-version">Versão da letra</label>
+              <select id="lyric-version" class="glass-input cal-select" aria-describedby="lyric-preview"></select>
+              <div id="lyric-preview" class="hint lyric-preview"></div>
+              <div class="row wrap">
+                <button id="lyric-apply" class="btn btn-small" type="button">Usar esta letra</button>
+                <button id="lyric-search" class="btn btn-small" type="button">Buscar outras versões</button>
+                <button id="lyric-import" class="btn btn-small" type="button">Importar .lrc</button>
+                <input id="lyric-file" type="file" accept=".lrc" hidden>
+              </div>
+              <p id="lyric-message" class="hint" role="status"></p>
+            </div>
+          </details>
 
           <div id="pending-box" class="hidden">
             <div class="label">Sugestões esperando aprovação</div>

@@ -1,7 +1,7 @@
 // Irmãs Cantoras — fluxo do app (telas, lobby, jogo, resultado)
 import { net } from './net.js?v=23';
 import * as yt from './youtube.js?v=23';
-import { findLyrics } from './lyrics.js?v=23';
+import { findLyrics, findLyricVersions, parseLRC } from './lyrics.js?v=24';
 import { assignParts, ALL } from './parts.js?v=23';
 import { mic } from './mic.js?v=23';
 import { Scorer } from './score.js?v=23';
@@ -193,7 +193,10 @@ function renderLobby() {
   $('btn-start').disabled = !(allReady && hasSong);
   let hint = '';
   if (net.isHost) {
-    if (!hasSong) hint = loadingId ? (state.autoStart ? 'Carregando a próxima… começa sozinha 🎶' : 'Carregando a música…') : 'Cola um link do YouTube pra escolher a música.';
+    if (!hasSong) {
+      if (loadingId) hint = state.autoStart ? 'Carregando a próxima… começa sozinha 🎶' : 'Carregando a música…';
+      else hint = lyricPicker ? 'Escolha uma letra ou pule para a próxima música.' : 'Cola um link do YouTube pra escolher a música.';
+    }
     else if (!allReady) hint = 'Esperando todas clicarem em "Estou pronta!".';
     else if (net.players.length < 2) hint = 'Dá pra começar sozinha pra treinar!';
   } else {
@@ -383,7 +386,7 @@ function submitLink() {
     toast(`Sugestão enviada! ${hostName()} vai aprovar ou não 🙂`, 4000);
     return;
   }
-  const busy = !!(state.song || loadingId || state.queue.length);
+  const busy = !!(state.song || loadingId || lyricPicker || state.queue.length);
   enqueue(id, myName());
   toast(busy ? 'Adicionada na playlist 🎶' : 'Carregando a música… 🎶');
 }
@@ -443,7 +446,7 @@ function renderPending() {
 // convidada mandou uma música: só a dona da sala coloca na fila
 // (só a dona da sala escolhe as músicas; convidadas não mandam links)
 
-const isQueued = (id) => !!((state.song && state.song.videoId === id) || loadingId === id || state.queue.some((q) => q.videoId === id));
+const isQueued = (id) => !!((state.song && state.song.videoId === id) || loadingId === id || lyricPicker?.videoId === id || state.queue.some((q) => q.videoId === id));
 
 function enqueue(id, by, title = 'Vídeo do YouTube') {
   if (isQueued(id)) return;
@@ -482,7 +485,7 @@ function fetchTitle(item) {
 
 /** (dona da sala) sem música atual? puxa a próxima da fila */
 function maybeLoadNext() {
-  if (!net.isHost || state.song || loadingId || state.game || !state.queue.length) return;
+  if (!net.isHost || state.song || loadingId || lyricPicker || state.game || !state.queue.length) return;
   const item = state.queue.shift();
   broadcastSetup();
   loadSong(item.videoId);
@@ -490,10 +493,143 @@ function maybeLoadNext() {
 
 let loadingId = null;
 let loadSeq = 0;   // cada carregamento tem seu número: um antigo (pulado) nunca mexe no atual, mesmo se for o mesmo vídeo
+let lyricPicker = null;
+const LYRIC_CHOICES_KEY = 'ic-lyric-choices';
+const lyricSelect = $('lyric-version');
+const lyricPanel = $('lyric-picker');
+
+function savedLyricChoices() {
+  try {
+    const choices = JSON.parse(local.get(LYRIC_CHOICES_KEY));
+    return Array.isArray(choices) ? choices : [];
+  } catch (e) { return []; }
+}
+
+function rememberLyricChoice(videoId, version) {
+  const choices = savedLyricChoices().filter((choice) => choice?.videoId !== videoId);
+  if (version) choices.unshift({ videoId, version });
+  local.set(LYRIC_CHOICES_KEY, JSON.stringify(choices.slice(0, 12)));
+}
+
+function clearLyricPicker() {
+  lyricPicker = null;
+  lyricPanel.open = false;
+  lyricPanel.classList.add('hidden');
+}
+
+const formatLyricTime = (t) => Math.floor(t / 60) + ':' + String(Math.floor(t % 60)).padStart(2, '0');
+const chosenLyric = (picker) => picker.versions[lyricSelect.value] || null;
+const canEditLyrics = (picker) => !!picker && lyricPicker === picker && net.isHost && !state.game;
+
+function renderLyricPreview() {
+  const picker = lyricPicker;
+  const chosen = chosenLyric(picker);
+  const preview = chosen || picker.automatic;
+  $('lyric-preview').textContent = preview
+    ? preview.lines.slice(0, 3).map(({ t, text }) => formatLyricTime(t) + '  ' + text).join('\n')
+    : 'O app vai buscar a letra mais compatível com o vídeo.';
+  lyricSelect.disabled = picker.busy;
+  $('lyric-search').disabled = picker.busy;
+  $('lyric-import').disabled = picker.busy;
+  $('lyric-apply').disabled = picker.busy || (!!state.song && chosen === picker.manual);
+  $('lyric-apply').textContent = !chosen && !picker.automatic ? 'Usar busca automática' : 'Usar esta letra';
+}
+
+function renderLyricVersions(picker, selected = picker.manual) {
+  const active = ' · em uso';
+  const automatic = picker.automatic;
+  lyricSelect.replaceChildren(new Option('Automático' + (automatic ? ' · ' + songName(automatic) : '')
+    + (state.song && !picker.manual ? active : ''), 'auto'));
+  picker.versions.forEach((v, i) => {
+    const label = [songName(v), v.album, v.duration ? formatLyricTime(v.duration) : '', v.source].filter(Boolean).join(' · ');
+    lyricSelect.add(new Option(label + (v === picker.manual ? active : ''), String(i)));
+  });
+  lyricSelect.value = selected ? String(picker.versions.indexOf(selected)) : 'auto';
+  renderLyricPreview();
+}
+
+function useLyric(picker, version, manual) {
+  picker.manual = manual ? version : null;
+  state.song = {
+    videoId: picker.videoId, title: picker.info.title, lines: version.lines,
+    artist: version.artist, track: version.track, lyricSource: version.source, lyricManual: manual,
+  };
+  const status = songLyricStatus(state.song);
+  const warning = version.diff > 8 ? ' ⚠️ A duração dessa versão é diferente do vídeo. Confira se a letra está no tempo.' : '';
+  songCard(picker.videoId, picker.info.title, status + warning, 'ok');
+}
+
+lyricSelect.onchange = renderLyricPreview;
+
+async function editLyrics(message, action) {
+  const picker = lyricPicker;
+  if (!canEditLyrics(picker) || picker.busy) return;
+  picker.busy = true;
+  $('lyric-message').textContent = message;
+  renderLyricPreview();
+  try {
+    await action(picker);
+  } catch (e) {
+    if (canEditLyrics(picker)) $('lyric-message').textContent = e.message;
+  } finally {
+    picker.busy = false;
+    if (lyricPicker === picker) renderLyricPreview();
+  }
+}
+
+$('lyric-search').onclick = () => editLyrics('Buscando outras versões da letra…', async (picker) => {
+  const { title, author, duration } = picker.info;
+  const found = await findLyricVersions(title, author, duration);
+  if (!canEditLyrics(picker)) return;
+  const selected = chosenLyric(picker);
+  const known = new Set([...picker.versions, picker.automatic].filter(Boolean).map((v) => JSON.stringify(v.lines)));
+  const additions = found.filter((v) => !known.has(JSON.stringify(v.lines)));
+  picker.versions.push(...additions);
+  renderLyricVersions(picker, selected);
+  $('lyric-message').textContent = additions.length ? 'Escolha uma versão para conferir as primeiras linhas.' : 'Nenhuma outra versão encontrada.';
+});
+
+$('lyric-import').onclick = () => $('lyric-file').click();
+$('lyric-file').onchange = (e) => {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  editLyrics('Lendo o arquivo…', async (picker) => {
+    if (file.size > 64 * 1024) throw new Error('Escolha um arquivo .lrc de até 64 KB.');
+    const lines = parseLRC(await file.text());
+    if (!canEditLyrics(picker)) return;
+    if (lines.length < 4 || lines.some((line) => !Number.isFinite(line.t) || (picker.info.duration && line.t >= picker.info.duration))) {
+      throw new Error('O arquivo precisa ter pelo menos quatro linhas com tempos dentro do vídeo.');
+    }
+    const version = { lines, track: file.name.slice(0, 120), source: 'Arquivo .lrc' };
+    picker.versions.push(version);
+    renderLyricVersions(picker, version);
+    $('lyric-message').textContent = 'Confira as primeiras linhas e clique em “Usar esta letra”.';
+  });
+};
+
+$('lyric-apply').onclick = () => editLyrics('', async (picker) => {
+  const chosen = chosenLyric(picker);
+  if (!chosen && !picker.automatic) {
+    $('lyric-message').textContent = 'Buscando a letra automaticamente…';
+    const { title, author, duration } = picker.info;
+    const automatic = await findLyrics(title, author, duration);
+    if (!canEditLyrics(picker)) return;
+    picker.automatic = automatic;
+  }
+  useLyric(picker, chosen || picker.automatic, !!chosen);
+  rememberLyricChoice(picker.videoId, chosen);
+  $('lyric-message').textContent = chosen ? 'Versão aplicada à sala.' : 'Modo automático aplicado à sala.';
+  renderLyricVersions(picker);
+  broadcastSetup();
+  renderLobby();
+});
+
 async function loadSong(id) {
   const my = ++loadSeq;
   const stale = () => my !== loadSeq;
   loadingId = id;
+  clearLyricPicker();
   state.song = null;
   broadcastSetup();
   songCard(id, 'Carregando…', 'Abrindo o vídeo…', '');
@@ -503,19 +639,32 @@ async function loadSong(id) {
     const info = await yt.prepare(id);
     if (stale()) return;
     state.preparedId = id;
-    songCard(id, info.title, 'Procurando a letra… 🔎', '');
-    const ly = await findLyrics(info.title, info.author, info.duration);
+    const saved = savedLyricChoices().find((choice) => choice?.videoId === id)?.version;
+    const manual = saved?.lines?.length >= 4 ? saved : null;
+    lyricPicker = { videoId: id, info, automatic: null, manual, versions: manual ? [manual] : [], busy: false };
+    if (!manual) {
+      songCard(id, info.title, 'Procurando a letra… 🔎', '');
+      const automatic = await findLyrics(info.title, info.author, info.duration);
+      if (stale()) return;
+      lyricPicker.automatic = automatic;
+    }
     if (stale()) return;
-    state.song = { videoId: id, title: info.title, lines: ly.lines, artist: ly.artist, track: ly.track };
-    if (ly.diff > 8) songCard(id, info.title, `Letra encontrada ✓ (${songName(ly)}). ⚠️ Esse vídeo tem partes a mais que a música, a letra pode ficar fora do tempo. Se der, usa o link do "áudio oficial".`, 'ok');
-    else songCard(id, info.title, `Letra encontrada ✓ (${songName(ly)})`, 'ok');
+    useLyric(lyricPicker, manual || lyricPicker.automatic, !!manual);
     ok = true;
   } catch (e) {
     if (stale()) return;
     const t = $('song-title').textContent;
     songCard(id, t === 'Carregando…' ? 'Vídeo do YouTube' : t, e.message, 'bad');
   } finally {
-    if (!stale()) loadingId = null;
+    if (!stale()) {
+      loadingId = null;
+      if (lyricPicker) {
+        $('lyric-message').textContent = '';
+        renderLyricVersions(lyricPicker);
+        lyricPanel.classList.remove('hidden');
+        lyricPanel.open = !ok;
+      }
+    }
     renderLobby();
   }
 
@@ -524,9 +673,11 @@ async function loadSong(id) {
     // veio do "Próxima música": começa sozinha se todas continuam prontas
     if (state.autoStart) {
       state.autoStart = false;
-      if (net.players.every((p) => p.ready)) setTimeout(() => { if (!state.game && state.song && state.song.videoId === id) startRound(); }, 1500);
+      if (net.players.every((p) => p.ready)) setTimeout(() => {
+        if (!stale() && !state.game && state.song?.videoId === id && !lyricPanel.open && !lyricPicker.busy) startRound();
+      }, 1500);
     }
-  } else if (state.queue.length) {
+  } else if (!lyricPicker && state.queue.length) {
     // não deu pra tocar essa? pula pra próxima da fila
     toast('Não deu pra usar essa música, indo pra próxima da fila…', 4000);
     setTimeout(() => { if (!state.song && !loadingId) maybeLoadNext(); }, 3000);
@@ -540,6 +691,7 @@ $('btn-skip').onclick = () => {
   if (!net.isHost || state.game) return;
   loadingId = null;
   loadSeq++;          // o carregamento em andamento (se tiver) vira "velho" e para de mexer na tela
+  clearLyricPicker();
   state.song = null;
   $('song-card').classList.add('hidden');
   broadcastSetup();
@@ -565,6 +717,10 @@ $('queue-list').addEventListener('click', (e) => {
 });
 
 const songName = (x) => (x.artist ? `${x.artist} – ` : '') + x.track;
+const songLyricStatus = (song) => [
+  song.lyricManual ? 'Letra escolhida' : song.lyricSource ? 'Letra automática' : 'Letra encontrada',
+  songName(song), song.lyricSource,
+].filter(Boolean).join(' · ');
 
 function songCard(id, title, status, cls) {
   $('song-card').classList.remove('hidden');
@@ -602,14 +758,13 @@ net.on('setup', async (msg) => {
   renderNight();
   if (net.isHost) { renderLobby(); return; }
   $('in-game-hint').classList.toggle('hidden', !msg.inGame || !!state.game);
-  if (state.song && msg.song && state.song.videoId === msg.song.videoId && state.preparedId === msg.song.videoId) { renderLobby(); return; }
   state.song = msg.song;
   $('guest-song-hint').classList.add('hidden');
   if (!state.song) { $('song-card').classList.add('hidden'); renderLobby(); return; }
 
   const s = state.song;
   if (state.preparedId === s.videoId) {
-    songCard(s.videoId, s.title, `Letra encontrada ✓ (${songName(s)})`, 'ok');
+    songCard(s.videoId, s.title, songLyricStatus(s), 'ok');
   } else if (guestPreparing === s.videoId) {
     // já estou carregando esse vídeo (a dona só mudou outra coisa, tipo o modo ou a fila): não recomeça
     renderLobby();
@@ -622,7 +777,7 @@ net.on('setup', async (msg) => {
       await yt.prepare(s.videoId);
       if (gone()) return;
       state.preparedId = s.videoId;
-      songCard(s.videoId, s.title, `Letra encontrada ✓ (${songName(s)})`, 'ok');
+      songCard(s.videoId, s.title, songLyricStatus(state.song), 'ok');
     } catch (e) {
       if (e.message === 'cancelado' || gone()) return;
       songCard(s.videoId, s.title, e.message, 'bad');
@@ -1960,6 +2115,7 @@ net.on('lobby', (msg) => {
   yt.pause();
   if (net.isHost) {
     state.song = null;
+    clearLyricPicker();
     state.autoStart = !!msg.autoStart;
     $('in-url').value = '';
     $('song-card').classList.add('hidden');

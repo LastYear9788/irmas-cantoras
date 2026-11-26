@@ -213,13 +213,15 @@ function deezerJsonp(url) {
   });
 }
 
-async function deezerFind(text, videoDuration, hay) {
+async function deezerFind(text, videoDuration, hay, st) {
   const res = await deezerSearch(text);
+  if (st.stop()) return;
   const items = ((res && res.data) || []).map((t) => ({ id: t.id, track: t.title, artist: t.artist && t.artist.name, duration: t.duration }));
   const cands = pickCandidates(items, videoDuration, hay);
-  if (!cands.length) return null;
+  if (!cands.length) return;
   const jwt = await deezerJwt();
   for (const c of cands) {
+    if (st.stop() || outOfTime()) break;
     const d = await proxied('https://pipe.deezer.com/api', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + jwt },
@@ -231,39 +233,64 @@ async function deezerFind(text, videoDuration, hay) {
     const sl = d && d.data && d.data.track && d.data.track.lyrics && d.data.track.lyrics.synchronizedLines;
     if (!sl || !sl.length) continue;
     const lines = parseLRC(sl.map((l) => l.lrcTimestamp + l.line).join('\n'));
-    if (lines.length >= 4) return { lines, diff: c.diff, score: c.score, artist: c.artist, track: c.track };
+    if (lines.length >= 4) {
+      st.consider(lyricResult(c, lines, 'Deezer'));
+      if (!st.collect) break;
+    }
   }
-  return null;
 }
 
 /* ---------- fonte 3: NetEase (bom pra música internacional) ---------- */
-async function neteaseFind(text, videoDuration, hay) {
+async function neteaseFind(text, videoDuration, hay, st) {
   const data = await proxied('https://music.163.com/api/search/get?type=1&limit=10&s=' + encodeURIComponent(text));
+  if (st.stop()) return;
   const items = ((data.result && data.result.songs) || []).map((s) => ({
     id: s.id, track: s.name, artist: (s.artists || []).map((a) => a.name).join(', '), duration: s.duration / 1000,
   }));
   for (const c of pickCandidates(items, videoDuration, hay)) {
+    if (st.stop() || outOfTime()) break;
     const ly = await proxied(`https://music.163.com/api/song/lyric?id=${c.id}&lv=-1&kv=-1&tv=-1`);
     const lrc = ly && ly.lrc && ly.lrc.lyric;
     if (!lrc) continue;
     const lines = parseLRC(lrc);
-    if (lines.length >= 4) return { lines, diff: c.diff, score: c.score, artist: c.artist, track: c.track };
+    if (lines.length >= 4) {
+      st.consider(lyricResult(c, lines, 'NetEase'));
+      if (!st.collect) break;
+    }
   }
-  return null;
+}
+
+function lyricResult(c, lines, source) {
+  return { lines, diff: c.diff, score: c.score, artist: c.artist, track: c.track, album: c.album, duration: c.duration, source };
 }
 
 /**
  * Procura a letra. Retorna { lines, artist, track, diff } ou lança erro com mensagem amigável.
  * Ordem: LRCLIB -> Deezer -> NetEase. Tudo automático.
  */
-export async function findLyrics(title, author, videoDuration) {
+export function findLyrics(title, author, videoDuration) {
+  return searchLyrics(title, author, videoDuration, false);
+}
+
+export function findLyricVersions(title, author, videoDuration) {
+  return searchLyrics(title, author, videoDuration, true);
+}
+
+async function searchLyrics(title, author, videoDuration, collect) {
   const queries = buildQueries(title, author);
   const hay = normName(title + ' ' + cleanAuthor(author)) + ' ' + plain(title);
   // Só a busca mais nova mexe em memo/relaxed/deadline: se pularam a música no meio,
   // a busca velha para no próximo passo (nem chega a perguntar pras outras fontes).
   const my = ++searchGen;
   const superseded = () => my !== searchGen;
-  const st = { best: null, down: 0, tried: 0, stop: superseded };
+  const versions = new Map();
+  const st = { best: null, down: 0, tried: 0, stop: superseded, collect, consider(r) {
+    if (superseded()) return;
+    if (!st.best || r.score < st.best.score) st.best = r;
+    if (!collect) return;
+    const key = JSON.stringify(r.lines);
+    if (!versions.has(key) || r.score < versions.get(key).score) versions.set(key, r);
+  } };
   deadline = Date.now() + 20000;   // no máximo ~20s procurando
   memo = new Map();
   let timedOut = false;
@@ -275,9 +302,9 @@ export async function findLyrics(title, author, videoDuration) {
       relaxed = rel;
       const r = await searchAll(queries, hay, videoDuration, st);
       if (superseded()) throw new Error('cancelado');
-      if (r) return r;
-      if (st.best) return st.best;
+      if (!collect && (r || st.best)) return r || st.best;
       if (outOfTime()) { timedOut = true; break; }
+      if (collect && versions.size >= 2) break;
     }
   } finally {
     if (!superseded()) {
@@ -287,8 +314,10 @@ export async function findLyrics(title, author, videoDuration) {
     }
   }
 
+  if (collect && versions.size) return [...versions.values()].sort((a, b) => a.score - b.score).slice(0, 12);
   if (timedOut) throw new Error('Os sites de letras estão muito lentos agora 😢 Tenta de novo daqui a pouco.');
   if (st.down === st.tried) throw new Error('Os sites de letras estão fora do ar agora 😢 Tenta de novo daqui a pouco.');
+  if (collect) return [];
   throw new Error('Não achei a letra dessa música 😕 Tenta outro link (de preferência o clipe oficial ou o áudio oficial).');
 }
 
@@ -296,9 +325,7 @@ export async function findLyrics(title, author, videoDuration) {
  *  Devolve logo se achar uma bem parecida; senão guarda a melhor em st.best */
 async function searchAll(queries, hay, videoDuration, st) {
   // nota = diferença de duração + 30 por "versão diferente" (remix, ao vivo, acústico…) que o vídeo não tem
-  const rank = (r) => (r.score != null ? r.score : r.diff);
-  const consider = (r) => { if (r && (!st.best || rank(r) < rank(st.best))) st.best = r; };
-  const good = () => !!(st.best && rank(st.best) <= 4);
+  const good = () => !st.collect && st.best && st.best.score <= 4;
 
   // 1) LRCLIB (passa pela mesma peneira das outras fontes: versão errada perde pra original)
   st.tried++;
@@ -309,18 +336,18 @@ async function searchAll(queries, hay, videoDuration, st) {
   const seen = new Set();
   for (const x of lr) {
     if (x.status !== 'fulfilled') continue;
-    for (const r of x.value || []) {
+    for (const r of Array.isArray(x.value) ? x.value : []) {
       if (!r.syncedLyrics || r.instrumental) continue;
       const key = r.id != null ? 'id' + r.id : `${r.trackName}|${r.artistName}|${r.duration}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      items.push({ track: r.trackName, artist: r.artistName, duration: r.duration || 0, lrc: r.syncedLyrics });
+      items.push({ track: r.trackName, artist: r.artistName, album: r.albumName, duration: r.duration || 0, lrc: r.syncedLyrics });
     }
   }
   for (const c of pickCandidates(items, videoDuration, hay, Infinity)) {
     const lines = parseLRC(c.lrc);
     if (lines.length < 4) continue;
-    consider({ lines, diff: c.diff, score: c.score, artist: c.artist, track: c.track });
+    st.consider(lyricResult(c, lines, 'LRCLIB'));
   }
   if (good()) return st.best;
 
@@ -331,9 +358,8 @@ async function searchAll(queries, hay, videoDuration, st) {
     // sem intermediário funcionando, nem tenta (Deezer precisa de um que aceite POST)
     if (!proxyAvailable(find === deezerFind)) continue;
     st.tried++;
-    const res = await Promise.allSettled(texts.map((t) => find(t, videoDuration, hay)));
+    const res = await Promise.allSettled(texts.map((t) => find(t, videoDuration, hay, st)));
     if (res.every((x) => x.status === 'rejected')) st.down++;
-    res.forEach((x) => { if (x.status === 'fulfilled') consider(x.value); });
     if (good()) return st.best;
   }
   return null;

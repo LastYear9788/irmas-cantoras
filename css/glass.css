@@ -182,6 +182,13 @@ main { position: relative; z-index: 2; min-height: 100vh; }
 .song-status { font-size: 13px; color: var(--muted); }
 .song-status.ok { color: #7cf29a; }
 .song-status.bad { color: #ffb4c8; }
+.lyric-picker { margin-top: 10px; }
+.lyric-picker summary { width: fit-content; max-width: 100%; cursor: pointer; }
+.lyric-controls { display: grid; gap: 8px; padding-top: 10px; }
+.lyric-controls select { width: 100%; }
+.lyric-controls .hint { margin: 0; }
+.lyric-controls .hint:empty { display: none; }
+.lyric-preview { white-space: pre-line; overflow-wrap: anywhere; }
 
 .segmented { display: flex; padding: 4px; border-radius: 999px; background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.12); }
 .seg { flex: 1; padding: 10px; border: 0; border-radius: 999px; background: transparent; cursor: pointer; font-weight: 600; color: var(--muted); transition: all 0.35s var(--spring); }
